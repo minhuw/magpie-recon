@@ -437,7 +437,10 @@ function showTip(ev, canvas) {
 async function load() {
   statusEl.textContent = "正在读 usage.jsonl 和 quota-history.json…"
   try {
-    const res = await fetch("api/dashboard", { headers: { "x-reserve-token": boot.token || "" } })
+    // No custom header: the desktop frame is sandboxed, and WebKit's preflight
+    // to 127.0.0.1 fails with nothing but "Load failed". The token rides on
+    // the query instead, which is a plain GET.
+    const res = await fetch("api/dashboard?t=" + encodeURIComponent(boot.token || ""))
     const body = await res.json()
     if (!res.ok) throw new Error(body.error || "读失败")
     if (!selected) selected = { kind: "total" }
