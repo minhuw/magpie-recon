@@ -51,6 +51,7 @@ button:disabled { cursor: wait; opacity: .55; }
 .provider-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
 .provider-head strong { font-size: 28px; line-height: 1.1; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
 .outcome { margin-top: 16px; font-size: 15px; font-weight: 600; }
+.exhaustion-time { display: block; margin-top: 4px; font-size: 30px; line-height: 1.2; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
 .outcome-detail { min-height: 20px; margin-top: 2px; }
 .forecast-chart, .daily-chart { display: block; width: 100%; height: auto; margin-top: 12px; overflow: visible; }
 .grid { stroke: var(--line); stroke-width: 1; }
@@ -61,7 +62,9 @@ button:disabled { cursor: wait; opacity: .55; }
 }
 .reset-label { fill: var(--fg); font-weight: 600; }
 .reset-line { stroke: var(--fg); stroke-width: 1; stroke-dasharray: 2 4; opacity: .5; }
-.projection { fill: none; stroke: var(--provider); stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 6 6; }
+.now-line { stroke: var(--fg); stroke-width: 1; opacity: .16; }
+.history { fill: none; stroke: var(--provider); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.projection { fill: none; stroke: var(--provider); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6; }
 .now-point { fill: var(--bg); stroke: var(--provider); stroke-width: 2.5; }
 .empty-point { fill: var(--provider); }
 .empty-time { fill: var(--provider); font-weight: 600; }

@@ -98,26 +98,34 @@ function hideTooltip() {
 
 function outcome(provider, now) {
   if (!provider.accounts) return { title: "没有进行中的窗口", detail: "等待额度读数" }
-  if (provider.left <= 0) return { title: "全部额度已用尽", detail: "等待重置" }
-  if (provider.status === "stale") return { title: "读数过旧，无法估算", detail: "需要最近 30 分钟内的额度读数" }
-  if (provider.status === "insufficient") return { title: "暂时无法估算", detail: "每个账号至少需要两个额度读数" }
+  if (provider.left <= 0) return { title: "当前额度受限", detail: "等待重置" }
+  if (provider.status === "stale") return { title: "暂时无法判断风险", detail: "需要最近 30 分钟内的额度读数" }
+  if (provider.status === "insufficient") return { title: "暂时无法判断风险", detail: "每个账号至少需要两个额度读数" }
   if (provider.emptyAt) {
     return {
-      title: "预计全部额度 " + when(provider.emptyAt) + " 耗尽",
+      title: "有全部耗尽风险",
+      headline: provider.emptyAt,
       detail: dur((new Date(provider.emptyAt).getTime() - now) / 3600000) + " 后",
     }
   }
   if (provider.firstEmptyAt) {
     const at = new Date(provider.firstEmptyAt).getTime()
+    if (at <= now) return { title: "当前有额度限制", detail: "下次重置 " + when(provider.resetAt) }
     return {
-      title: at <= now ? "已有账号耗尽" : "最早账号 " + when(provider.firstEmptyAt) + " 耗尽",
-      detail: at <= now ? "其他账号仍有额度" : dur((at - now) / 3600000) + " 后 · 单账号预测",
+      title: "有单账号耗尽风险",
+      headline: provider.firstEmptyAt,
+      detail: dur((at - now) / 3600000) + " 后",
     }
   }
   if (provider.projectedLeftAtReset != null) {
-    return { title: "各账号重置前不会耗尽", detail: "下次重置时平均剩余 " + provider.projectedLeftAtReset + "%" }
+    return { title: "重置前没有耗尽风险", detail: "下次重置时平均剩余 " + provider.projectedLeftAtReset + "%" }
   }
-  return { title: "重置前不会耗尽", detail: "" }
+  return { title: "暂未发现耗尽风险", detail: "" }
+}
+
+function dateName(iso) {
+  const date = new Date(iso)
+  return date.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })
 }
 
 function forecastChart(provider, now, width = 520) {
@@ -126,11 +134,11 @@ function forecastChart(provider, now, width = 520) {
   const plotBottom = height - pad.bottom
   const plotWidth = width - pad.left - pad.right
   const plotHeight = plotBottom - pad.top
+  const start = now - 15 * 86400000
+  const end = now + 15 * 86400000
   const reset = Date.parse(provider.resetAt)
   const empty = Date.parse(provider.emptyAt)
-  const end = Math.max(now + 30 * 60000, Number.isFinite(reset) ? reset : 0, Number.isFinite(empty) ? empty : 0)
-  const safeEnd = end > now ? end : now + 30 * 60000
-  const x = (at) => pad.left + (at - now) / (safeEnd - now) * plotWidth
+  const x = (at) => pad.left + (at - start) / (end - start) * plotWidth
   const y = (left) => pad.top + (100 - left) / 100 * plotHeight
   const result = outcome(provider, now)
   const label = provider.label + "，剩余 " + (provider.left ?? "—") + "%，" + result.title + "，下次重置 " + when(provider.resetAt)
@@ -152,38 +160,49 @@ function forecastChart(provider, now, width = 520) {
     return chart
   }
 
-  chart.append(svgEl("text", { class: "axis-label", x: pad.left, y: height - 10 }, "现在"))
+  const nowX = x(now)
+  chart.append(svgEl("line", { class: "now-line", x1: nowX, y1: pad.top, x2: nowX, y2: plotBottom }))
 
-  if (Number.isFinite(reset)) {
+  if (Number.isFinite(reset) && reset >= start && reset <= end) {
     const xx = x(reset)
+    const anchor = xx > width - 130 ? "end" : xx < 130 ? "start" : "middle"
     chart.append(
       svgEl("line", { class: "reset-line", x1: xx, y1: pad.top, x2: xx, y2: plotBottom }),
-      svgEl("text", { class: "reset-label", x: xx, y: 15, "text-anchor": "end" }, "下次重置"),
-      svgEl("text", { class: "axis-label", x: xx, y: height - 10, "text-anchor": "end" }, when(provider.resetAt)),
+      svgEl("text", { class: "reset-label", x: xx, y: 15, "text-anchor": anchor }, "重置 " + when(provider.resetAt)),
     )
   }
 
-  const nowX = x(now)
+  const path = (points) => points
+    .filter((point) => {
+      const at = Date.parse(point.at)
+      return at >= start && at <= end && Number.isFinite(point.left)
+    })
+    .map((point, index) => (index === 0 ? "M" : "L") + x(Date.parse(point.at)).toFixed(2) + "," + y(point.left).toFixed(2))
+    .join(" ")
+  const history = Array.isArray(provider.history) ? provider.history : []
   const projection = Array.isArray(provider.projection) ? provider.projection : []
-  const nowLeft = Date.parse(projection[0]?.at) === now ? projection[0].left : provider.left
-  const nowY = y(nowLeft)
-  if (projection.length > 1) {
-    const d = projection.map((point, index) => {
-      const prefix = index === 0 ? "M" : "L"
-      return prefix + x(Date.parse(point.at)).toFixed(2) + "," + y(point.left).toFixed(2)
-    }).join(" ")
-    chart.append(svgEl("path", { class: "projection", d }))
-  }
-  chart.append(svgEl("circle", { class: "now-point", cx: nowX, cy: nowY, r: 4.5 }))
+  const historyPath = path(history)
+  const projectionPath = path(projection)
+  if (historyPath) chart.append(svgEl("path", { class: "history", d: historyPath }))
+  if (projectionPath) chart.append(svgEl("path", { class: "projection", d: projectionPath }))
 
-  if (Number.isFinite(empty)) {
+  const nowLeft = Date.parse(projection[0]?.at) === now ? projection[0].left : provider.left
+  chart.append(svgEl("circle", { class: "now-point", cx: nowX, cy: y(nowLeft), r: 4.5 }))
+
+  if (Number.isFinite(empty) && empty >= start && empty <= end) {
     const xx = x(empty)
-    const labelX = Math.max(pad.left + 48, Math.min(width - pad.right - 48, xx))
+    const labelX = Math.max(pad.left + 34, Math.min(width - pad.right - 34, xx))
     chart.append(
       svgEl("circle", { class: "empty-point", cx: xx, cy: y(0), r: 4 }),
-      svgEl("text", { class: "empty-time", x: labelX, y: y(0) - 11, "text-anchor": "middle" }, "全部耗尽 " + when(provider.emptyAt)),
+      svgEl("text", { class: "empty-time", x: labelX, y: y(0) - 11, "text-anchor": "middle" }, "全部耗尽"),
     )
   }
+
+  chart.append(
+    svgEl("text", { class: "axis-label", x: pad.left, y: height - 10 }, dateName(start)),
+    svgEl("text", { class: "axis-label", x: nowX, y: height - 10, "text-anchor": "middle" }, "现在"),
+    svgEl("text", { class: "axis-label", x: width - pad.right, y: height - 10, "text-anchor": "end" }, dateName(end)),
+  )
   return chart
 }
 
@@ -200,6 +219,7 @@ function providerPanel(provider, now) {
 
   const result = outcome(provider, now)
   panel.append(el("p", "outcome", result.title))
+  if (result.headline) panel.append(el("strong", "exhaustion-time", when(result.headline)))
   if (result.detail) panel.append(el("p", "outcome-detail", result.detail))
   else panel.append(el("p", "outcome-detail", " "))
   panel.append(forecastChart(provider, now))
@@ -383,7 +403,7 @@ function render(data) {
   const figureHead = el("div", "figure-head")
   const title = el("h2", "", "额度耗尽预测")
   title.id = "forecast-title"
-  figureHead.append(title, el("p", "note", "各账号分别按最近速度外推，再合并剩余；不跨重置。"))
+  figureHead.append(title, el("p", "note", "实线为实际剩余；虚线按近 7 天平均速度估算，重置后恢复 100%。"))
   figure.append(figureHead)
 
   const byId = new Map((data.providers || []).map((provider) => [provider.id, provider]))
@@ -394,7 +414,7 @@ function render(data) {
   const grid = el("div", "provider-grid")
   for (const provider of providers) grid.append(providerPanel(provider, now))
   figure.append(grid)
-  figure.append(el("figcaption", "note", "顶部为最近读数，曲线为估算；百分比按账号平均。"))
+  figure.append(el("figcaption", "note", "前后各 15 天；顶部为最近读数。"))
   app.append(figure)
 
   const dailyById = new Map((data.dailyProviders || []).map((provider) => [provider.id, provider]))
