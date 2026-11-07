@@ -1,6 +1,7 @@
 const boot = JSON.parse(document.getElementById("boot").textContent || "{}")
 const statusEl = document.getElementById("status")
 const app = document.getElementById("app")
+const tooltip = document.getElementById("tooltip")
 
 function el(tag, cls, text) {
   const node = document.createElement(tag)
@@ -34,25 +35,65 @@ function dayName(day) {
   return day.slice(5).replace("-", "/")
 }
 
-const compactNumber = new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 1 })
+const compactNumber = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 })
 const decimalNumber = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 })
 
 function accountUnits(value) {
   return value == null ? "—" : decimalNumber.format(value)
 }
 
+function tokenValue(value, partial) {
+  if (value == null) return "—"
+  return compactNumber.format(value) + (partial ? "+" : "")
+}
+
 function tokenText(value, partial) {
-  if (value == null) return "tokens —"
-  return compactNumber.format(value) + (partial ? "+" : "") + " tokens"
+  return value == null ? "tokens —" : tokenValue(value, partial) + " tokens"
+}
+
+function costValue(value, partial) {
+  if (value == null) return "—"
+  const formatted = Math.abs(value) >= 1000 ? compactNumber.format(value) : (Math.round(value * 100) / 100).toFixed(2)
+  return "$" + formatted + (partial ? "+" : "")
 }
 
 function costText(value, partial) {
-  if (value == null) return "成本 —"
-  return "成本 $" + (Math.round(value * 100) / 100).toFixed(2) + (partial ? "+" : "")
+  return "成本 " + costValue(value, partial)
 }
 
 function dayDescription(value) {
   return value.day + " · " + accountUnits(value.accountUnits) + " 账号当量 · " + tokenText(value.tokens, value.tokensPartial) + " · " + costText(value.cost, value.costPartial)
+}
+
+function positionTooltip(x, y) {
+  const rect = tooltip.getBoundingClientRect()
+  const gutter = 8
+  let left = x + 14
+  if (left + rect.width > innerWidth - gutter) left = x - rect.width - 14
+  let top = y + 16
+  if (top + rect.height > innerHeight - gutter) top = y - rect.height - 16
+  tooltip.style.left = Math.max(gutter, Math.min(left, innerWidth - rect.width - gutter)) + "px"
+  tooltip.style.top = Math.max(gutter, Math.min(top, innerHeight - rect.height - gutter)) + "px"
+}
+
+function showTooltip(value, x, y) {
+  tooltip.replaceChildren()
+  tooltip.append(el("div", "tooltip-date", value.day))
+  const rows = el("div", "tooltip-rows")
+  for (const [label, text] of [
+    ["账号当量", accountUnits(value.accountUnits)],
+    ["Token", tokenValue(value.tokens, value.tokensPartial)],
+    ["成本", costValue(value.cost, value.costPartial)],
+  ]) {
+    rows.append(el("span", "tooltip-label", label), el("span", "tooltip-value", text))
+  }
+  tooltip.append(rows)
+  tooltip.hidden = false
+  positionTooltip(x, y)
+}
+
+function hideTooltip() {
+  tooltip.hidden = true
 }
 
 function outcome(provider, now) {
@@ -236,10 +277,23 @@ function dailyChart(provider, panel, width = 520) {
       "aria-label": dayDescription(value),
       "aria-pressed": String(value.day === panel._selectedDay),
     })
-    hit.append(svgEl("title", {}, dayDescription(value)))
     const select = () => selectDay(panel, value.day)
-    hit.addEventListener("click", select)
-    hit.addEventListener("focus", select)
+    hit.addEventListener("mouseenter", (event) => showTooltip(value, event.clientX, event.clientY))
+    hit.addEventListener("mousemove", (event) => {
+      if (tooltip.hidden) showTooltip(value, event.clientX, event.clientY)
+      else positionTooltip(event.clientX, event.clientY)
+    })
+    hit.addEventListener("mouseleave", hideTooltip)
+    hit.addEventListener("focus", () => {
+      select()
+      const rect = hit.getBoundingClientRect()
+      showTooltip(value, rect.left + rect.width / 2, rect.top)
+    })
+    hit.addEventListener("blur", hideTooltip)
+    hit.addEventListener("click", (event) => {
+      select()
+      showTooltip(value, event.clientX, event.clientY)
+    })
     hit.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault()
@@ -322,6 +376,7 @@ function fitCharts() {
 }
 
 function render(data) {
+  hideTooltip()
   app.replaceChildren()
   const now = Date.parse(data.now)
   const figure = el("figure", "forecast")
@@ -383,8 +438,13 @@ document.getElementById("reload").addEventListener("click", (event) => {
   event.currentTarget.textContent = "刷新中…"
   location.reload()
 })
+document.addEventListener("pointerdown", (event) => {
+  if (!event.target.closest?.(".day-hit")) hideTooltip()
+})
+addEventListener("scroll", hideTooltip, true)
 let resizeFrame = 0
 addEventListener("resize", () => {
+  hideTooltip()
   cancelAnimationFrame(resizeFrame)
   resizeFrame = requestAnimationFrame(fitCharts)
 })

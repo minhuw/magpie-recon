@@ -79,6 +79,25 @@ button:disabled { cursor: wait; opacity: .55; }
 .day-column:hover .day-bar { opacity: .85; }
 .day-hit { fill: transparent; cursor: pointer; }
 .day-hit:focus-visible { outline: none; stroke: var(--fg); stroke-width: 1; }
+.tooltip {
+  position: fixed;
+  z-index: 5;
+  width: 220px;
+  max-width: calc(100vw - 16px);
+  padding: 11px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--fg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .2);
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+.tooltip[hidden] { display: none; }
+.tooltip-date { padding-bottom: 8px; border-bottom: 1px solid var(--line); font-weight: 650; }
+.tooltip-rows { display: grid; grid-template-columns: 1fr auto; gap: 6px 20px; padding-top: 9px; }
+.tooltip-label { color: var(--muted); }
+.tooltip-value { text-align: right; font-weight: 600; }
 figcaption.note { margin-top: 10px; }
 .windows { margin-top: 24px; border-top: 1px solid var(--line); }
 .windows summary { width: fit-content; padding: 14px 0; font-weight: 600; cursor: pointer; }
