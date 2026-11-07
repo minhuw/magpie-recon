@@ -25,6 +25,7 @@
   } catch { /* default port */ }
 
   const q = new URLSearchParams()
+  q.set("r", String(Date.now()))
   if (theme) q.set("theme", theme)
   const slim = {}
   for (const [k, v] of Object.entries(tokens || {})) {

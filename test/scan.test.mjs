@@ -157,11 +157,14 @@ test("a sandboxed page can read the service", async () => {
     assert.equal(opt.status, 204)
     assert.equal(opt.headers.get("access-control-allow-origin"), "null")
     assert.match(opt.headers.get("access-control-allow-headers") || "", /x-reserve-token/)
-    const got = await fetch(`http://127.0.0.1:${port}/api/dashboard?t=abcd`)
+    const got = await fetch(`http://127.0.0.1:${port}/api/dashboard`)
     assert.equal(got.headers.get("access-control-allow-origin"), "null")
     assert.equal(got.status, 200)
     const page = await fetch(`http://127.0.0.1:${port}/`)
     assert.equal(page.headers.get("access-control-allow-origin"), null)
+    const html = await page.text()
+    assert.match(html, /verdict/)
+    assert.doesNotMatch(html, /src="app.js"/)
     const denied = await fetch(`http://127.0.0.1:${port}/api/dashboard`, {
       headers: { Origin: "https://evil.test", "x-reserve-token": "abcd" },
     })
