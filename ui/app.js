@@ -76,6 +76,20 @@ function positionTooltip(x, y) {
   tooltip.style.top = Math.max(gutter, Math.min(top, innerHeight - rect.height - gutter)) + "px"
 }
 
+function showAccountTooltip(accounts, resetAt, x, y) {
+  tooltip.replaceChildren()
+  tooltip.append(el("div", "tooltip-date", "重置 " + when(resetAt)))
+  const list = el("div", "tooltip-accounts")
+  for (const account of accounts) {
+    const row = el("div", "tooltip-account")
+    row.append(el("span", "tooltip-account-name", account.label), el("span", "tooltip-value", account.window))
+    list.append(row)
+  }
+  tooltip.append(list)
+  tooltip.hidden = false
+  positionTooltip(x, y)
+}
+
 function showTooltip(value, x, y) {
   tooltip.replaceChildren()
   tooltip.append(el("div", "tooltip-date", value.day))
@@ -98,29 +112,20 @@ function hideTooltip() {
 
 function outcome(provider, now) {
   if (!provider.accounts) return { title: "没有进行中的窗口", detail: "等待额度读数" }
-  if (provider.left <= 0) return { title: "当前额度受限", detail: "等待重置" }
-  if (provider.status === "stale") return { title: "暂时无法判断风险", detail: "需要最近 30 分钟内的额度读数" }
-  if (provider.status === "insufficient") return { title: "暂时无法判断风险", detail: "每个账号至少需要两个额度读数" }
+  if (provider.left <= 0) return { title: "会耗尽", detail: "等待重置" }
+  if (provider.status === "stale") return { title: "暂时无法判断", detail: "需要最近 30 分钟内的额度读数" }
+  if (provider.status === "insufficient") return { title: "暂时无法判断", detail: "每个账号至少需要两个额度读数" }
   if (provider.emptyAt) {
     return {
-      title: "有全部耗尽风险",
+      title: "会耗尽",
       headline: provider.emptyAt,
       detail: dur((new Date(provider.emptyAt).getTime() - now) / 3600000) + " 后",
     }
   }
-  if (provider.firstEmptyAt) {
-    const at = new Date(provider.firstEmptyAt).getTime()
-    if (at <= now) return { title: "当前有额度限制", detail: "下次重置 " + when(provider.resetAt) }
-    return {
-      title: "有单账号耗尽风险",
-      headline: provider.firstEmptyAt,
-      detail: dur((at - now) / 3600000) + " 后",
-    }
-  }
   if (provider.projectedLeftAtReset != null) {
-    return { title: "重置前没有耗尽风险", detail: "下次重置时平均剩余 " + provider.projectedLeftAtReset + "%" }
+    return { title: "不会耗尽", detail: "下次重置时平均剩余 " + provider.projectedLeftAtReset + "%" }
   }
-  return { title: "暂未发现耗尽风险", detail: "" }
+  return { title: "不会耗尽", detail: "" }
 }
 
 function dateName(iso) {
@@ -142,7 +147,7 @@ function forecastChart(provider, now, width = 520) {
   const y = (left) => pad.top + (100 - left) / 100 * plotHeight
   const result = outcome(provider, now)
   const label = provider.label + "，剩余 " + (provider.left ?? "—") + "%，" + result.title + "，下次重置 " + when(provider.resetAt)
-  const chart = svgEl("svg", { class: "forecast-chart", viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": label })
+  const chart = svgEl("svg", { class: "forecast-chart", viewBox: `0 0 ${width} ${height}`, role: "group", "aria-label": label })
   chart._source = { provider, now, width }
   chart.append(svgEl("title", {}, label))
   if (provider.resetLabel) chart.append(svgEl("desc", {}, "下次重置窗口：" + provider.resetLabel))
@@ -163,13 +168,54 @@ function forecastChart(provider, now, width = 520) {
   const nowX = x(now)
   chart.append(svgEl("line", { class: "now-line", x1: nowX, y1: pad.top, x2: nowX, y2: plotBottom }))
 
-  if (Number.isFinite(reset) && reset >= start && reset <= end) {
-    const xx = x(reset)
-    const anchor = xx > width - 130 ? "end" : xx < 130 ? "start" : "middle"
-    chart.append(
+  const resets = []
+  for (const account of provider.accountsDetail || []) {
+    const resetAt = Date.parse(account.reset)
+    const cycle = resetAt - Date.parse(account.start)
+    if (!Number.isFinite(resetAt) || !(cycle > 0)) continue
+    for (let at = resetAt; at <= end; at += cycle) {
+      if (at >= start) resets.push({ at, account })
+    }
+  }
+  const groups = new Map()
+  for (const event of resets) {
+    const key = String(event.at)
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(event.account)
+  }
+  for (const [key, accounts] of groups) {
+    const at = Number(key)
+    const xx = x(at)
+    const marker = svgEl("g", { class: "reset-marker" })
+    const names = accounts.map((account) => account.label + " · " + account.window).join("、")
+    const description = "重置 " + when(new Date(at).toISOString()) + "：" + names
+    marker.append(
       svgEl("line", { class: "reset-line", x1: xx, y1: pad.top, x2: xx, y2: plotBottom }),
-      svgEl("text", { class: "reset-label", x: xx, y: 15, "text-anchor": anchor }, "重置 " + when(provider.resetAt)),
+      svgEl("circle", { class: "reset-dot", cx: xx, cy: 22, r: 3.5 }),
     )
+    const hit = svgEl("rect", {
+      class: "reset-hit",
+      x: xx - 8,
+      y: 10,
+      width: 16,
+      height: plotBottom - 10,
+      tabindex: 0,
+      role: "button",
+      "aria-label": description,
+    })
+    const show = (event) => {
+      const point = event && Number.isFinite(event.clientX) ? event : hit.getBoundingClientRect()
+      const clientX = Number.isFinite(point.clientX) ? point.clientX : point.left + point.width / 2
+      const clientY = Number.isFinite(point.clientY) ? point.clientY : point.top
+      showAccountTooltip(accounts, new Date(at).toISOString(), clientX, clientY)
+    }
+    hit.addEventListener("mouseenter", show)
+    hit.addEventListener("mousemove", show)
+    hit.addEventListener("focus", show)
+    hit.addEventListener("mouseleave", hideTooltip)
+    hit.addEventListener("blur", hideTooltip)
+    marker.append(hit)
+    chart.append(marker)
   }
 
   const path = (points) => points
@@ -459,7 +505,7 @@ document.getElementById("reload").addEventListener("click", (event) => {
   location.reload()
 })
 document.addEventListener("pointerdown", (event) => {
-  if (!event.target.closest?.(".day-hit")) hideTooltip()
+  if (!event.target.closest?.(".day-hit, .reset-hit")) hideTooltip()
 })
 addEventListener("scroll", hideTooltip, true)
 let resizeFrame = 0
