@@ -1,0 +1,31 @@
+{
+  "name": "magpie-recon",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "A magpie page that reads usage.jsonl and quota-history.json: pool reserve, burn, whether to speed up or add accounts, and per-key usage over 1, 3, 7 and 30 days.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/minhuw/magpie-recon.git"
+  },
+  "main": "./index.mjs",
+  "scripts": {
+    "test": "node --test"
+  },
+  "magpie": {
+    "name": "Reserve",
+    "summary": {
+      "en": "Pool reserve, burn and per-key usage from usage.jsonl and quota-history.json.",
+      "zh": "从 usage.jsonl 和 quota-history.json 看总储备、消耗速度，以及每把钥匙的用量。"
+    },
+    "page": {
+      "title": "Reserve",
+      "titles": { "zh": "储备", "zh-TW": "儲備" },
+      "file": "page/index.html",
+      "icon": "page/icon.svg",
+      "service": { "port": 3478, "option": "port" }
+    },
+    "options": { "port": 3478, "dir": "" }
+  },
+  "engines": { "node": ">=18" }
+}
