@@ -7,7 +7,6 @@ const compact = new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFra
 let data = null
 let tab = "people"
 let selected = null
-let timer = 0
 
 function el(tag, cls, text) {
   const n = document.createElement(tag)
@@ -434,33 +433,26 @@ function showTip(ev, canvas) {
   tip.style.top = (ev.clientY + 16) + "px"
 }
 
-async function load() {
-  statusEl.textContent = "正在读 usage.jsonl 和 quota-history.json…"
-  try {
-    // No custom header: the desktop frame is sandboxed, and WebKit's preflight
-    // to 127.0.0.1 fails with nothing but "Load failed". The token rides on
-    // the query instead, which is a plain GET.
-    const res = await fetch("api/dashboard?t=" + encodeURIComponent(boot.token || ""))
-    const body = await res.json()
-    if (!res.ok) throw new Error(body.error || "读失败")
-    if (!selected) selected = { kind: "total" }
-    const y = document.scrollingElement ? document.scrollingElement.scrollTop : 0
-    render(body)
-    if (document.scrollingElement) document.scrollingElement.scrollTop = y
-    statusEl.textContent = fileLine(body)
-  } catch (err) {
-    statusEl.textContent = err && err.message ? err.message : String(err)
+function show() {
+  const body = boot.dashboard
+  if (!body) {
+    statusEl.textContent = "这一页没有带上用量。"
+    return
   }
+  if (body.error) {
+    statusEl.textContent = body.error
+    return
+  }
+  if (!selected) selected = { kind: "total" }
+  render(body)
+  statusEl.textContent = fileLine(body)
 }
 
-document.getElementById("reload").addEventListener("click", () => load())
+document.getElementById("reload").addEventListener("click", () => location.reload())
 addEventListener("resize", () => {
   if (!data) return
   const candles = document.getElementById("candles")
   if (candles) drawCandles(candles, data.candles)
   renderTrend()
 })
-load()
-timer = setInterval(() => { if (!document.hidden) load() }, 60000)
-document.addEventListener("visibilitychange", () => { if (!document.hidden) load() })
-void timer
+show()
