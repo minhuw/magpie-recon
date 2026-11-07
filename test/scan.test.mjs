@@ -67,49 +67,33 @@ test("a window behind an even burn is fast, and only its own remaining counts", 
 
 test("provider forecasts use seven-day burn and include every account", async () => {
   const start = now - 2 * DAY
-  const reset = iso(now + 60 * DAY)
+  const reset = iso(start + 7 * DAY)
   const points = (fromLeft, toLeft) => [
     { at: iso(now - 2 * HOUR), left: fromLeft, start: iso(start), resetsAt: reset },
     { at: iso(now), left: toLeft, start: iso(start), resetsAt: reset },
   ]
-  const claudeReset = iso(now + 12 * HOUR)
-  const quota = {
+  const dash = await analyze({
     "codex|a": { week: points(70, 40) },
     "Codex|b": { week: points(90, 80) },
-    "claude|c": {
-      week: [
-        { at: iso(now - 2 * HOUR), left: 90, start: iso(start), resetsAt: claudeReset },
-        { at: iso(now), left: 80, start: iso(start), resetsAt: claudeReset },
-      ],
-    },
-  }
-  const dash = await analyze(quota, [], now, { offsetMin: 0 })
+    "claude|c": { week: points(90, 80) },
+  }, [], now, { offsetMin: 0 })
   assert.deepEqual(dash.providers.map((p) => p.id), ["codex", "claude"])
   const codex = dash.providers[0]
   assert.equal(codex.left, 60)
   assert.equal(codex.accounts, 2)
   assert.equal(codex.status, "ready")
-  assert.equal(codex.firstEmptyAt, iso(now + (40 / (30 / 7)) * DAY))
-  assert.equal(codex.emptyAt, iso(now + 56 * DAY))
+  assert.equal(codex.firstEmptyAt, null)
+  assert.equal(codex.emptyAt, null)
   assert.equal(codex.resetAt, reset)
   assert.equal(codex.projection[0].left, 60)
   assert.equal(codex.projection[1].left, 57.1)
   assert.equal(codex.projection.at(-1).at, iso(now + 15 * DAY))
-
-  const claude = dash.providers[1]
-  assert.equal(claude.left, 80)
-  assert.equal(claude.status, "ready")
-  assert.equal(claude.firstEmptyAt, null)
-  assert.equal(claude.emptyAt, null)
-  assert.equal(claude.projectedLeftAtReset, 79.3)
-  assert.equal(claude.resetAt, claudeReset)
-  assert.equal(claude.projection.find((p) => p.at === claudeReset).left, 100)
-  assert.equal(claude.projection.at(-1).at, iso(now + 15 * DAY))
+  assert.equal(dash.providers[1].resetAt, reset)
 })
 
 test("one empty account does not mean the whole provider is empty", async () => {
   const start = now - 2 * DAY
-  const reset = iso(now + 5 * DAY)
+  const reset = iso(start + 7 * DAY)
   const points = (fromLeft, toLeft) => [
     { at: iso(now - 2 * HOUR), left: fromLeft, start: iso(start), resetsAt: reset },
     { at: iso(now), left: toLeft, start: iso(start), resetsAt: reset },
@@ -127,7 +111,7 @@ test("one empty account does not mean the whole provider is empty", async () => 
 
 test("an all-account forecast requires every account to have a fresh trajectory", async () => {
   const start = now - 2 * DAY
-  const reset = iso(now + 5 * DAY)
+  const reset = iso(start + 7 * DAY)
   const dash = await analyze({
     "codex|known": { week: [
       { at: iso(now - 2 * HOUR), left: 30, start: iso(start), resetsAt: reset },
@@ -148,26 +132,26 @@ test("staggered resets do not hide another account's later depletion", async () 
   const start = now - 2 * DAY
   const dash = await analyze({
     "codex|reset-first": { week: [
-      { at: iso(now - 2 * HOUR), left: 100, start: iso(start), resetsAt: iso(now + HOUR) },
-      { at: iso(now), left: 100, start: iso(start), resetsAt: iso(now + HOUR) },
+      { at: iso(now - 2 * HOUR), left: 100, start: iso(start), resetsAt: iso(start + 7 * DAY) },
+      { at: iso(now), left: 100, start: iso(start), resetsAt: iso(start + 7 * DAY) },
     ] },
     "codex|empty-later": { week: [
-      { at: iso(now - 2 * HOUR), left: 30, start: iso(start), resetsAt: iso(now + 15 * DAY) },
-      { at: iso(now), left: 20, start: iso(start), resetsAt: iso(now + 15 * DAY) },
+      { at: iso(now - 2 * HOUR), left: 30, start: iso(now - 4 * DAY), resetsAt: iso(now + 3 * DAY) },
+      { at: iso(now), left: 20, start: iso(now - 4 * DAY), resetsAt: iso(now + 3 * DAY) },
     ] },
   }, [], now, { offsetMin: 0 })
   const codex = dash.providers[0]
-  assert.equal(codex.resetAt, iso(now + HOUR))
-  assert.equal(codex.firstEmptyAt, iso(now + 14 * DAY))
-  assert.equal(codex.firstEmptyLabel, "codex · empty-later")
+  assert.equal(codex.resetAt, iso(now + 3 * DAY))
+  assert.equal(codex.firstEmptyAt, null)
+  assert.equal(codex.firstEmptyLabel, null)
   assert.equal(codex.emptyAt, null)
-  assert.equal(codex.projectedLeftAtReset, 60)
+  assert.equal(codex.projectedLeftAtReset, 57.9)
   assert.equal(codex.projection.at(-1).at, iso(now + 15 * DAY))
 })
 
 test("absolute depletion is anchored to the latest reading and stale pools are not forecast", async () => {
   const start = now - 2 * DAY
-  const reset = iso(now + 5 * DAY)
+  const reset = iso(start + 7 * DAY)
   const dash = await analyze({
     "codex|stale": { week: [
       { at: iso(now - 3 * HOUR), left: 50, start: iso(start), resetsAt: reset },
@@ -182,7 +166,7 @@ test("absolute depletion is anchored to the latest reading and stale pools are n
 
 test("fresh lagging readings use one time origin for the whole curve", async () => {
   const start = now - 2 * DAY
-  const reset = iso(now + 5 * DAY)
+  const reset = iso(start + 7 * DAY)
   const dash = await analyze({
     "codex|lagging": { week: [
       { at: iso(now - 30 * 60000), left: 100, start: iso(start), resetsAt: reset },
@@ -195,7 +179,28 @@ test("fresh lagging readings use one time origin for the whole curve", async () 
   assert.equal(codex.projection[0].at, iso(now))
   assert.equal(codex.projection[0].left, 19.9)
   assert.equal(codex.emptyAt, iso(now - 10 * 60000 + 1.75 * DAY))
-  assert.equal(codex.projection.find((p) => p.at === codex.emptyAt).left, 0)
+  assert.equal(codex.projectedLeftAtReset, 0)
+})
+
+test("forecasts use week windows and ignore shorter quota windows", async () => {
+  const start = now - 2 * DAY
+  const weekReset = iso(start + 7 * DAY)
+  const dash = await analyze({
+    "codex|mixed": {
+      "7 days": [
+        { at: iso(now - 2 * HOUR), left: 70, start: iso(start), resetsAt: weekReset },
+        { at: iso(now), left: 40, start: iso(start), resetsAt: weekReset },
+      ],
+      "5 hours": [
+        { at: iso(now - HOUR), left: 95, start: iso(now - HOUR), resetsAt: iso(now + 4 * HOUR) },
+      ],
+    },
+  }, [], now, { offsetMin: 0 })
+  assert.equal(dash.windows.length, 2)
+  assert.equal(dash.providers[0].accounts, 1)
+  assert.equal(dash.providers[0].left, 40)
+  assert.equal(dash.providers[0].resetAt, weekReset)
+  assert.equal(dash.providers[0].accountsDetail[0].window, "7 days")
 })
 
 test("daily figures sum real account progress and keep tokens and cost separate", async () => {
@@ -270,7 +275,10 @@ test("a full untouched account is idle, and a short hot window does not ask for 
       week: [{ at: iso(now - 60000), left: 99, start: iso(start), resetsAt: iso(now + 4 * DAY) }],
     },
     "codex|busy@x": {
-      "5 hours": [{ at: iso(now - 60000), left: 5, start: iso(now - 4 * HOUR), resetsAt: iso(now + HOUR) }],
+      week: [
+        { at: iso(now - 2 * HOUR), left: 25, start: iso(now - 2 * DAY), resetsAt: iso(now + 5 * DAY) },
+        { at: iso(now), left: 5, start: iso(now - 2 * DAY), resetsAt: iso(now + 5 * DAY) },
+      ],
     },
   }
   const dash = await analyze(quota, [
@@ -282,7 +290,7 @@ test("a full untouched account is idle, and a short hot window does not ask for 
   assert.equal(idle.binding, true)
   assert.equal(busy.pace, "hot")
   assert.equal(dash.verdict.id, "tighten")
-  assert.equal(dash.verdict.shortOnly, true)
+  assert.equal(dash.verdict.shortOnly, false)
 })
 
 test("missing files are an unknown reserve, not an error", async () => {

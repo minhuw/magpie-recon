@@ -61,8 +61,7 @@ button:disabled { cursor: wait; opacity: .55; }
   font-variant-numeric: tabular-nums;
 }
 .reset-label { fill: var(--fg); font-weight: 600; }
-.reset-line { stroke: var(--fg); stroke-width: 1; stroke-dasharray: 2 4; opacity: .5; }
-.reset-dot { fill: var(--fg); }
+.reset-dot { fill: var(--bg); stroke: var(--provider); stroke-width: 2.5; }
 .reset-hit { fill: transparent; cursor: pointer; }
 .reset-hit:focus-visible { outline: none; stroke: var(--fg); stroke-width: 1; }
 .now-line { stroke: var(--fg); stroke-width: 1; opacity: .16; }

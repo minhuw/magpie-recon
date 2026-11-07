@@ -168,6 +168,20 @@ function forecastChart(provider, now, width = 520) {
   const nowX = x(now)
   chart.append(svgEl("line", { class: "now-line", x1: nowX, y1: pad.top, x2: nowX, y2: plotBottom }))
 
+  const path = (points) => points
+    .filter((point) => {
+      const at = Date.parse(point.at)
+      return at >= start && at <= end && Number.isFinite(point.left)
+    })
+    .map((point, index) => (index === 0 ? "M" : "L") + x(Date.parse(point.at)).toFixed(2) + "," + y(point.left).toFixed(2))
+    .join(" ")
+  const history = Array.isArray(provider.history) ? provider.history : []
+  const projection = Array.isArray(provider.projection) ? provider.projection : []
+  const historyPath = path(history)
+  const projectionPath = path(projection)
+  if (historyPath) chart.append(svgEl("path", { class: "history", d: historyPath }))
+  if (projectionPath) chart.append(svgEl("path", { class: "projection", d: projectionPath }))
+
   const resets = []
   for (const account of provider.accountsDetail || []) {
     const resetAt = Date.parse(account.reset)
@@ -186,19 +200,17 @@ function forecastChart(provider, now, width = 520) {
   for (const [key, accounts] of groups) {
     const at = Number(key)
     const xx = x(at)
+    const previous = projection.findLast((point) => Date.parse(point.at) < at)
     const marker = svgEl("g", { class: "reset-marker" })
     const names = accounts.map((account) => account.label + " · " + account.window).join("、")
-    const description = "重置 " + when(new Date(at).toISOString()) + "：" + names
-    marker.append(
-      svgEl("line", { class: "reset-line", x1: xx, y1: pad.top, x2: xx, y2: plotBottom }),
-      svgEl("circle", { class: "reset-dot", cx: xx, cy: 22, r: 3.5 }),
-    )
-    const hit = svgEl("rect", {
+    const description = "周额度重置 " + when(new Date(at).toISOString()) + "：" + names
+    const dot = svgEl("circle", { class: "reset-dot", cx: xx, cy: y(previous?.left ?? 100), r: 4.5 })
+    marker.append(dot)
+    const hit = svgEl("circle", {
       class: "reset-hit",
-      x: xx - 8,
-      y: 10,
-      width: 16,
-      height: plotBottom - 10,
+      cx: xx,
+      cy: y(previous?.left ?? 100),
+      r: 10,
       tabindex: 0,
       role: "button",
       "aria-label": description,
@@ -217,20 +229,6 @@ function forecastChart(provider, now, width = 520) {
     marker.append(hit)
     chart.append(marker)
   }
-
-  const path = (points) => points
-    .filter((point) => {
-      const at = Date.parse(point.at)
-      return at >= start && at <= end && Number.isFinite(point.left)
-    })
-    .map((point, index) => (index === 0 ? "M" : "L") + x(Date.parse(point.at)).toFixed(2) + "," + y(point.left).toFixed(2))
-    .join(" ")
-  const history = Array.isArray(provider.history) ? provider.history : []
-  const projection = Array.isArray(provider.projection) ? provider.projection : []
-  const historyPath = path(history)
-  const projectionPath = path(projection)
-  if (historyPath) chart.append(svgEl("path", { class: "history", d: historyPath }))
-  if (projectionPath) chart.append(svgEl("path", { class: "projection", d: projectionPath }))
 
   const nowLeft = Date.parse(projection[0]?.at) === now ? projection[0].left : provider.left
   chart.append(svgEl("circle", { class: "now-point", cx: nowX, cy: y(nowLeft), r: 4.5 }))
@@ -449,7 +447,7 @@ function render(data) {
   const figureHead = el("div", "figure-head")
   const title = el("h2", "", "额度耗尽预测")
   title.id = "forecast-title"
-  figureHead.append(title, el("p", "note", "实线为实际剩余；虚线按近 7 天平均速度估算，重置后恢复 100%。"))
+  figureHead.append(title, el("p", "note", "只看周额度；实线为实际剩余，虚线按近 7 天平均速度估算。"))
   figure.append(figureHead)
 
   const byId = new Map((data.providers || []).map((provider) => [provider.id, provider]))
@@ -460,7 +458,7 @@ function render(data) {
   const grid = el("div", "provider-grid")
   for (const provider of providers) grid.append(providerPanel(provider, now))
   figure.append(grid)
-  figure.append(el("figcaption", "note", "前后各 15 天；顶部为最近读数。"))
+  figure.append(el("figcaption", "note", "前后各 15 天；圆点为周额度重置。"))
   app.append(figure)
 
   const dailyById = new Map((data.dailyProviders || []).map((provider) => [provider.id, provider]))
