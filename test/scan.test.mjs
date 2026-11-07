@@ -196,6 +196,49 @@ test("fresh lagging readings use one time origin for the whole curve", async () 
   assert.equal(codex.projection[1].left, 0)
 })
 
+test("daily figures sum real account progress and keep tokens and cost separate", async () => {
+  const start = "2026-07-01T00:00:00Z"
+  const reset = "2026-07-20T00:00:00Z"
+  const point = (at, left) => ({ at, left, start, resetsAt: reset })
+  const quota = {
+    "codex|a": { week: [
+      point("2026-07-14T12:00:00Z", 100),
+      point("2026-07-15T01:00:00Z", 70),
+      point("2026-07-15T02:00:00Z", 65),
+      point("2026-07-15T03:00:00Z", 95),
+    ] },
+    "codex|b": { week: [
+      point("2026-07-15T01:00:00Z", 90),
+      point("2026-07-15T02:00:00Z", 70),
+    ] },
+    "claude|c": { week: [
+      point("2026-07-15T01:00:00Z", 100),
+      point("2026-07-15T02:00:00Z", 80),
+    ] },
+  }
+  const records = [
+    { t: "2026-07-15T00:00:00Z", provider: "Codex", in: 0, out: 0, cost: 0 },
+    { t: "2026-07-15T04:00:00Z", provider: "Codex", in: 600, out: 400, cost: 5.25 },
+    { t: "2026-07-15T05:00:00Z", provider: "codex", in: 100, out: 50 },
+    { t: "2026-07-15T04:00:00Z", provider: "claude", in: 200, out: 100, cost: 7.5 },
+  ]
+  const dash = await analyze(quota, records, now, { offsetMin: 0 })
+  assert.deepEqual(dash.dailyProviders.map((p) => p.id), ["codex", "claude"])
+  const codex = dash.dailyProviders[0].values.find((d) => d.day === "2026-07-15")
+  assert.equal(codex.accountUnits, 0.55)
+  assert.equal(codex.tokens, 1150)
+  assert.equal(codex.cost, 5.25)
+  assert.equal(codex.costPartial, true)
+  const claude = dash.dailyProviders[1].values.find((d) => d.day === "2026-07-15")
+  assert.equal(claude.accountUnits, 0.2)
+  assert.equal(claude.tokens, 300)
+  assert.equal(claude.cost, 7.5)
+  assert.equal(claude.costPartial, false)
+  const beforeHistory = dash.dailyProviders[0].values.find((d) => d.day === "2026-07-13")
+  assert.equal(beforeHistory.tokens, null)
+  assert.equal(beforeHistory.accountUnits, null)
+})
+
 test("a pool candle is the mean of the accounts, not the mean of their wicks", async () => {
   const start = "2026-07-01T00:00:00Z"
   const reset = "2026-07-20T00:00:00Z"

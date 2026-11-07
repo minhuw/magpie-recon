@@ -30,6 +30,31 @@ function when(iso) {
   return date.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
 }
 
+function dayName(day) {
+  return day.slice(5).replace("-", "/")
+}
+
+const compactNumber = new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 1 })
+const decimalNumber = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 })
+
+function accountUnits(value) {
+  return value == null ? "—" : decimalNumber.format(value)
+}
+
+function tokenText(value, partial) {
+  if (value == null) return "tokens —"
+  return compactNumber.format(value) + (partial ? "+" : "") + " tokens"
+}
+
+function costText(value, partial) {
+  if (value == null) return "成本 —"
+  return "成本 $" + (Math.round(value * 100) / 100).toFixed(2) + (partial ? "+" : "")
+}
+
+function dayDescription(value) {
+  return value.day + " · " + accountUnits(value.accountUnits) + " 账号当量 · " + tokenText(value.tokens, value.tokensPartial) + " · " + costText(value.cost, value.costPartial)
+}
+
 function outcome(provider, now) {
   if (!provider.accounts) return { title: "没有进行中的窗口", detail: "等待额度读数" }
   if (provider.left <= 0) return { title: "全部额度已用尽", detail: "等待重置" }
@@ -144,6 +169,117 @@ function providerPanel(provider, now) {
   return panel
 }
 
+function selectDay(panel, day) {
+  const value = panel._daily.values.find((item) => item.day === day)
+  if (!value) return
+  panel._selectedDay = day
+  panel.querySelector(".day-date").textContent = dayName(day)
+  panel.querySelector(".day-account").textContent = accountUnits(value.accountUnits)
+  panel.querySelector(".day-usage").textContent = tokenText(value.tokens, value.tokensPartial) + " · " + costText(value.cost, value.costPartial)
+  for (const column of panel.querySelectorAll(".day-column")) {
+    const on = column.dataset.day === day
+    column.classList.toggle("on", on)
+    column.querySelector(".day-hit")?.setAttribute("aria-pressed", String(on))
+  }
+}
+
+function dailyChart(provider, panel, width = 520) {
+  const values = provider.values || []
+  const height = 180
+  const pad = { left: 38, right: 10, top: 16, bottom: 30 }
+  const plotBottom = height - pad.bottom
+  const plotWidth = width - pad.left - pad.right
+  const plotHeight = plotBottom - pad.top
+  const max = Math.max(1, ...values.map((value) => value.accountUnits || 0))
+  const top = Math.ceil(max * 2) / 2
+  const y = (value) => plotBottom - value / top * plotHeight
+  const chart = svgEl("svg", {
+    class: "daily-chart",
+    viewBox: `0 0 ${width} ${height}`,
+    role: "group",
+    "aria-label": provider.label + " 每日账号当量；选择日期查看 token 和成本",
+  })
+  chart._source = { provider, panel, width }
+  chart.append(svgEl("title", {}, provider.label + " 每日用量"))
+
+  for (const value of [0, top / 2, top]) {
+    const yy = y(value)
+    chart.append(
+      svgEl("line", { class: "grid", x1: pad.left, y1: yy, x2: width - pad.right, y2: yy }),
+      svgEl("text", { class: "axis-label", x: pad.left - 9, y: yy + 4, "text-anchor": "end" }, decimalNumber.format(value)),
+    )
+  }
+
+  const slot = values.length ? plotWidth / values.length : plotWidth
+  values.forEach((value, index) => {
+    const column = svgEl("g", { class: "day-column" + (value.day === panel._selectedDay ? " on" : ""), "data-day": value.day })
+    if (value.accountUnits != null) {
+      const barWidth = Math.max(2, slot * 0.56)
+      const barHeight = value.accountUnits > 0 ? Math.max(2, plotBottom - y(value.accountUnits)) : 1
+      column.append(svgEl("rect", {
+        class: "day-bar",
+        x: pad.left + slot * index + (slot - barWidth) / 2,
+        y: plotBottom - barHeight,
+        width: barWidth,
+        height: barHeight,
+        rx: Math.min(2, barWidth / 2),
+      }))
+    }
+    const hit = svgEl("rect", {
+      class: "day-hit",
+      x: pad.left + slot * index,
+      y: pad.top,
+      width: slot,
+      height: plotHeight,
+      tabindex: 0,
+      role: "button",
+      "aria-label": dayDescription(value),
+      "aria-pressed": String(value.day === panel._selectedDay),
+    })
+    hit.append(svgEl("title", {}, dayDescription(value)))
+    const select = () => selectDay(panel, value.day)
+    hit.addEventListener("click", select)
+    hit.addEventListener("focus", select)
+    hit.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault()
+        select()
+      }
+    })
+    column.append(hit)
+    chart.append(column)
+  })
+
+  for (const index of [...new Set([0, Math.floor((values.length - 1) / 2), values.length - 1])]) {
+    if (index < 0 || !values[index]) continue
+    const anchor = index === 0 ? "start" : index === values.length - 1 ? "end" : "middle"
+    chart.append(svgEl("text", {
+      class: "axis-label",
+      x: pad.left + slot * (index + (anchor === "middle" ? 0.5 : anchor === "end" ? 1 : 0)),
+      y: height - 8,
+      "text-anchor": anchor,
+    }, dayName(values[index].day)))
+  }
+  return chart
+}
+
+function dailyPanel(provider) {
+  const panel = el("article", "daily-provider")
+  const color = provider.id === "codex" ? "var(--codex)" : provider.id === "claude" ? "var(--claude)" : "var(--accent)"
+  panel.style.setProperty("--provider", color)
+  panel._daily = provider
+  panel._selectedDay = provider.values?.at(-1)?.day
+  const head = el("div", "daily-head")
+  head.append(el("h3", "", provider.label), el("span", "day-date muted"))
+  const summary = el("div", "day-summary")
+  const account = el("div", "day-account-wrap")
+  account.append(el("strong", "day-account"), el("span", "muted", "账号当量"))
+  summary.append(account, el("span", "day-usage muted"))
+  panel.append(head, summary, dailyChart(provider, panel))
+  if (panel._selectedDay) selectDay(panel, panel._selectedDay)
+  return panel
+}
+
 function windowDetails(rows) {
   const details = el("details", "windows")
   const summary = el("summary", "", "账号窗口 ")
@@ -173,12 +309,15 @@ function windowDetails(rows) {
   return details
 }
 
-function fitForecastCharts() {
-  for (const chart of app.querySelectorAll(".forecast-chart")) {
+function fitCharts() {
+  for (const chart of app.querySelectorAll(".forecast-chart, .daily-chart")) {
     const source = chart._source
     const width = Math.round(chart.getBoundingClientRect().width)
     if (!source || !width || width === source.width) continue
-    chart.replaceWith(forecastChart(source.provider, source.now, width))
+    const replacement = chart.classList.contains("forecast-chart")
+      ? forecastChart(source.provider, source.now, width)
+      : dailyChart(source.provider, source.panel, width)
+    chart.replaceWith(replacement)
   }
 }
 
@@ -202,8 +341,27 @@ function render(data) {
   figure.append(grid)
   figure.append(el("figcaption", "note", "顶部为最近读数，曲线为估算；百分比按账号平均。"))
   app.append(figure)
+
+  const dailyById = new Map((data.dailyProviders || []).map((provider) => [provider.id, provider]))
+  const dailyFigure = el("figure", "daily-usage")
+  const dailyTitle = el("h2", "", "每日用量")
+  dailyTitle.id = "daily-title"
+  const dailyHead = el("div", "figure-head")
+  dailyHead.append(dailyTitle, el("p", "note", "1 账号当量 = 各账号最长窗口当天下降百分比之和；重置回升不计。"))
+  dailyFigure.append(dailyHead)
+  const dailyGrid = el("div", "daily-grid")
+  for (const provider of providers) {
+    const daily = dailyById.get(provider.id) || {
+      id: provider.id,
+      label: provider.label,
+      values: data.days.map((day) => ({ day, tokens: null, cost: null, accountUnits: null })),
+    }
+    dailyGrid.append(dailyPanel(daily))
+  }
+  dailyFigure.append(dailyGrid)
+  app.append(dailyFigure)
   if (data.windows.length) app.append(windowDetails(data.windows))
-  fitForecastCharts()
+  fitCharts()
 }
 
 function show() {
@@ -228,6 +386,6 @@ document.getElementById("reload").addEventListener("click", (event) => {
 let resizeFrame = 0
 addEventListener("resize", () => {
   cancelAnimationFrame(resizeFrame)
-  resizeFrame = requestAnimationFrame(fitForecastCharts)
+  resizeFrame = requestAnimationFrame(fitCharts)
 })
 show()
