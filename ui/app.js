@@ -447,7 +447,7 @@ function render(data) {
   const figureHead = el("div", "figure-head")
   const title = el("h2", "", "额度耗尽预测")
   title.id = "forecast-title"
-  figureHead.append(title, el("p", "note", "只看周额度；实线为实际剩余，虚线按近 7 天平均速度估算。"))
+  figureHead.append(title, el("p", "note", "只看周额度；实线为实际剩余，虚线按近 3 天平均速度估算。"))
   figure.append(figureHead)
 
   const byId = new Map((data.providers || []).map((provider) => [provider.id, provider]))

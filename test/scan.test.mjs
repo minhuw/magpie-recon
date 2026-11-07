@@ -65,7 +65,7 @@ test("a window behind an even burn is fast, and only its own remaining counts", 
   assert.equal(dash.candles.find((c) => c.day === "2026-07-14").volume, 50000)
 })
 
-test("provider forecasts use seven-day burn and include every account", async () => {
+test("provider forecasts use three-day burn and include every account", async () => {
   const start = now - 2 * DAY
   const reset = iso(start + 7 * DAY)
   const points = (fromLeft, toLeft) => [
@@ -82,11 +82,11 @@ test("provider forecasts use seven-day burn and include every account", async ()
   assert.equal(codex.left, 60)
   assert.equal(codex.accounts, 2)
   assert.equal(codex.status, "ready")
-  assert.equal(codex.firstEmptyAt, null)
+  assert.equal(codex.firstEmptyAt, iso(now + 4 * DAY))
   assert.equal(codex.emptyAt, null)
   assert.equal(codex.resetAt, reset)
   assert.equal(codex.projection[0].left, 60)
-  assert.equal(codex.projection[1].left, 57.1)
+  assert.equal(codex.projection[1].left, 53.3)
   assert.equal(codex.projection.at(-1).at, iso(now + 15 * DAY))
   assert.equal(dash.providers[1].resetAt, reset)
 })
@@ -103,10 +103,10 @@ test("one empty account does not mean the whole provider is empty", async () => 
     "codex|idle": { week: points(90, 90) },
   }, [], now, { offsetMin: 0 })
   const codex = dash.providers[0]
-  assert.equal(codex.firstEmptyAt, iso(now + 3.5 * DAY))
+  assert.equal(codex.firstEmptyAt, iso(now + 1.5 * DAY))
   assert.equal(codex.emptyAt, null)
   assert.equal(codex.projectedLeftAtReset, 45)
-  assert.equal(codex.projection.find((p) => p.at === iso(now + 3.5 * DAY)).left, 45)
+  assert.equal(codex.projection.find((p) => p.at === iso(now + 1.5 * DAY)).left, 45)
 })
 
 test("an all-account forecast requires every account to have a fresh trajectory", async () => {
@@ -145,7 +145,7 @@ test("staggered resets do not hide another account's later depletion", async () 
   assert.equal(codex.firstEmptyAt, null)
   assert.equal(codex.firstEmptyLabel, null)
   assert.equal(codex.emptyAt, null)
-  assert.equal(codex.projectedLeftAtReset, 57.9)
+  assert.equal(codex.projectedLeftAtReset, 55)
   assert.equal(codex.projection.at(-1).at, iso(now + 15 * DAY))
 })
 
@@ -158,7 +158,7 @@ test("absolute depletion is anchored to the latest reading and stale pools are n
       { at: iso(now - 2 * HOUR), left: 40, start: iso(start), resetsAt: reset },
     ] },
   }, [], now, { offsetMin: 0 })
-  assert.equal(dash.windows[0].forecastEmptyAt, iso(now - 2 * HOUR + 28 * DAY))
+  assert.equal(dash.windows[0].forecastEmptyAt, iso(now - 2 * HOUR + 12 * DAY))
   assert.equal(dash.providers[0].status, "stale")
   assert.equal(dash.providers[0].emptyAt, null)
   assert.deepEqual(dash.providers[0].projection, [])
@@ -177,8 +177,8 @@ test("fresh lagging readings use one time origin for the whole curve", async () 
   assert.equal(codex.status, "ready")
   assert.equal(codex.left, 20)
   assert.equal(codex.projection[0].at, iso(now))
-  assert.equal(codex.projection[0].left, 19.9)
-  assert.equal(codex.emptyAt, iso(now - 10 * 60000 + 1.75 * DAY))
+  assert.equal(codex.projection[0].left, 19.8)
+  assert.equal(codex.emptyAt, iso(now - 10 * 60000 + 0.75 * DAY))
   assert.equal(codex.projectedLeftAtReset, 0)
 })
 
