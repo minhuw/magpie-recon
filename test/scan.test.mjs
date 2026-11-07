@@ -5,7 +5,9 @@ import { join } from "node:path"
 import test from "node:test"
 
 import { analyze } from "../lib/scan.mjs"
-import { hostAllowed, loadDashboard, originAllowed, resolveDir, tokenOk } from "../lib/server.mjs"
+import { createServer } from "node:http"
+
+import { createHandler, hostAllowed, loadDashboard, originAllowed, resolveDir, tokenOk } from "../lib/server.mjs"
 
 const DAY = 24 * 3600 * 1000
 const HOUR = 3600 * 1000
@@ -141,6 +143,32 @@ test("a quota file that is not the history object is refused", async () => {
   const dir = await mkdtemp(join(tmpdir(), "magpie-reserve-"))
   await writeFile(join(dir, "quota-history.json"), "[]")
   await assert.rejects(() => loadDashboard(dir, now), /quota-history/)
+})
+
+test("a sandboxed page can read the service", async () => {
+  const port = 3491
+  const srv = createServer(createHandler({ port, token: "abcd", dir: "" }))
+  await new Promise((resolve) => srv.listen(port, "127.0.0.1", resolve))
+  try {
+    const opt = await fetch(`http://127.0.0.1:${port}/api/dashboard`, {
+      method: "OPTIONS",
+      headers: { Origin: "null", "Access-Control-Request-Headers": "x-reserve-token" },
+    })
+    assert.equal(opt.status, 204)
+    assert.equal(opt.headers.get("access-control-allow-origin"), "null")
+    assert.match(opt.headers.get("access-control-allow-headers") || "", /x-reserve-token/)
+    const got = await fetch(`http://127.0.0.1:${port}/api/dashboard`, {
+      headers: { Origin: "null", "x-reserve-token": "abcd" },
+    })
+    assert.equal(got.headers.get("access-control-allow-origin"), "null")
+    assert.equal(got.status, 200)
+    const denied = await fetch(`http://127.0.0.1:${port}/api/dashboard`, {
+      headers: { Origin: "https://evil.test", "x-reserve-token": "abcd" },
+    })
+    assert.equal(denied.status, 403)
+  } finally {
+    await new Promise((resolve) => srv.close(resolve))
+  }
 })
 
 test("the service only answers loopback, and a token of the wrong length is just a miss", () => {
