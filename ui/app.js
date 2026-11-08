@@ -110,11 +110,104 @@ function hideTooltip() {
   tooltip.hidden = true
 }
 
+function guidanceText(provider, now) {
+  const guide = provider.guidance
+  if (!provider.accounts || !guide) return { state: "observe", title: "等待周额度读数", reason: "读到进行中的周额度窗口后，会在这里显示使用建议。" }
+  const change = Number.isFinite(guide.changePct) ? Math.max(1, Math.round(Math.abs(guide.changePct))) : null
+  switch (guide.action) {
+    case "reduce":
+      return {
+        state: "reduce",
+        title: change >= 100 ? "建议暂缓使用，等待额度恢复" : "用得偏快，建议减少约 " + change + "%",
+        reason: guide.emptyAt && Date.parse(guide.emptyAt) <= Date.parse(guide.resetAt)
+          ? "按当前节奏，预计 " + when(guide.emptyAt) + " 耗尽周额度；放慢用量可延长可用时间。"
+          : "当前节奏难以在重置时保留 " + guide.reservePct + " 个百分点，建议降到目标用量。",
+      }
+    case "increase":
+      return { state: "increase", title: "有余量，可增加约 " + change + "%", reason: "按当前习惯，重置前还有较多额度可用；如有任务，可在常用时段增加使用。" }
+    case "hold":
+      return { state: "hold", title: "节奏合适，保持当前用量", reason: "当前用量接近目标范围，继续按原有习惯使用即可。" }
+    case "idle":
+      if (guide.targetDailyBurn <= 0) return { state: "idle", title: "剩余额度已在预留范围内", reason: "当前余额不超过目标安全余量，建议等待重置；如需继续使用，可调低目标预留。" }
+      return { state: "idle", title: "当前用量很少，有额度可用", reason: "如有任务，可参考建议日消耗开始使用；当前用量接近零，不换算增幅百分比。" }
+    case "wait":
+      return { state: "wait", title: "周额度已耗尽，等待重置", reason: "当前所有账号的周额度都已用完，最早于 " + when(guide.nextResetAt) + " 重置。" }
+    case "stale":
+      return { state: "observe", title: "读数较旧，暂不建议调整用量", reason: "需要最近 30 分钟内的额度读数，更新后再判断该增快还是放慢。" }
+    case "short_limited":
+      return { state: "observe", title: "短时额度偏紧，暂不建议提速", reason: "周额度仍有余量，但短时窗口正在限制使用；先等待短时额度重置，或使用仍可用的账号。" }
+    default:
+      return { state: "observe", title: "暂时无法判断快慢", reason: "至少需要 6 小时可比较的额度读数，才能给出增减比例；现有 " + decimalNumber.format(guide.coverageHours || 0) + " 小时。" }
+  }
+}
+
+function usageGuide(providers, now, reservePct = providers.find((p) => p.guidance)?.guidance.reservePct ?? 3) {
+  const section = el("section", "usage-guide")
+  section.setAttribute("aria-labelledby", "usage-guide-title")
+  const title = el("h2", "", "使用建议")
+  title.id = "usage-guide-title"
+  const heading = el("div", "guide-heading")
+  const policy = el("label", "guide-policy muted", "重置时目标预留 ")
+  const select = el("select", "")
+  select.setAttribute("aria-label", "每账号安全余量")
+  const choices = [...new Set([0, 3, 5, 10, reservePct])].sort((a, b) => a - b)
+  for (const value of choices) {
+    const option = el("option", "", value + " 个百分点")
+    option.value = value
+    option.selected = value === reservePct
+    select.append(option)
+  }
+  select.addEventListener("change", () => {
+    const url = new URL(location.href)
+    url.searchParams.set("reservePct", select.value)
+    location.assign(url.href)
+  })
+  policy.append(select)
+  heading.append(title, policy)
+  section.append(heading, el("p", "note", "目标是持续用到周额度重置，并留出安全余量。增减比例指额度消耗速度。"))
+  const list = el("div", "guide-list")
+  for (const provider of providers) {
+    const guide = provider.guidance
+    const text = guidanceText(provider, now)
+    const row = el("article", "guide-row guide-" + text.state)
+    row.setAttribute("aria-label", provider.label + " 使用建议")
+    row.append(el("h3", "guide-provider", provider.label))
+    const body = el("div", "guide-body")
+    body.append(el("p", "guide-action", text.title), el("p", "guide-reason muted", text.reason))
+    if (guide?.accountsEmpty > 0 && guide.accountsEmpty < guide.totalAccounts) {
+      body.append(el("p", "guide-reason muted", "已有 " + guide.accountsEmpty + " 个账号周额度耗尽，后续用量按转移到其余账号估算。"))
+    }
+    row.append(body)
+    const rates = el("dl", "guide-rates")
+    const rate = (value) => Number.isFinite(value) ? decimalNumber.format(value) + " 个百分点 / 天" : "暂无法估算"
+    const stale = guide?.action === "stale"
+    for (const [label, value] of [["按当前节奏", stale ? null : guide?.currentDailyBurn], [guide?.action === "observe" || guide?.action === "idle" ? "日预算参考" : "建议日消耗", stale ? null : guide?.targetDailyBurn]]) {
+      rates.append(el("dt", "muted", label), el("dd", "", rate(value)))
+    }
+    row.append(rates)
+    if (guide) {
+      const details = el("details", "guide-details")
+      details.append(el("summary", "", "建议依据"))
+      details.append(el("p", "", "以 " + when(guide.resetAt) + " 前的使用为计划，每个账号预留 " + guide.reservePct + " 个百分点。目标附近约 10% 的偏差通常建议保持；预计提前耗尽时仍建议减速。"))
+      const pattern = guide.seasonal === "weekly" ? "参考每周和日内规律" : guide.seasonal === "daily" ? "参考日内规律" : "按近期用量估计，尚未启用时段规律"
+      details.append(el("p", "", "有效观测 " + decimalNumber.format(guide.coverageHours) + " 小时；" + pattern + "。近期读数权重更高，额度耗尽后的停用不当作需求下降。"))
+      details.append(el("p", "", "日消耗指未来 24 小时的估计；多账号时取每账号平均值，不能直接等同请求量或 token 数。"))
+      if (guide.assumption) details.append(el("p", "", "多账号按容量相同、请求可互相切换估算；不同订阅档位的结果需要结合实际容量判断。"))
+      for (const limited of guide.shortLimited || []) details.append(el("p", "", limited.label + " · " + limited.window + " 剩余 " + limited.left + "%，重置于 " + when(limited.reset) + "。"))
+      row.append(details)
+    }
+    list.append(row)
+  }
+  section.append(list)
+  return section
+}
+
 function outcome(provider, now) {
   if (!provider.accounts) return { title: "没有进行中的窗口", detail: "等待额度读数" }
-  if (provider.left <= 0) return { title: "会耗尽", detail: "等待重置" }
+  if (provider.left <= 0) return { title: "已耗尽", detail: "等待重置" }
   if (provider.status === "stale") return { title: "暂时无法判断", detail: "需要最近 30 分钟内的额度读数" }
-  if (provider.status === "insufficient") return { title: "暂时无法判断", detail: "每个账号至少需要两个额度读数" }
+  if (provider.status === "insufficient") return { title: "暂时无法判断", detail: "需要至少 20 分钟可比较的额度读数" }
+  if (provider.emptyAt && Date.parse(provider.emptyAt) <= now) return { title: "可能已耗尽", detail: "估计用量已超过最后读数，需要更新额度确认" }
   if (provider.emptyAt) {
     return {
       title: "会耗尽",
@@ -327,7 +420,7 @@ function render(data) {
   const figureHead = el("div", "figure-head")
   const title = el("h2", "", "额度耗尽预测")
   title.id = "forecast-title"
-  figureHead.append(title, el("p", "note", "只看周额度；历史按小时显示并保留小时内极值，虚线按近 3 天平均速度估算。"))
+  figureHead.append(title, el("p", "note", "只看周额度；历史按小时显示并保留小时内极值，虚线按近期用量和已识别的时段规律估算。"))
   figure.append(figureHead, forecastControls(now), el("p", "chart-range muted"))
 
   const byId = new Map((data.providers || []).map((provider) => [provider.id, provider]))
@@ -335,6 +428,7 @@ function render(data) {
   for (const provider of data.providers || []) {
     if (provider.id !== "codex" && provider.id !== "claude") providers.push(provider)
   }
+  app.append(usageGuide(providers, now, data.policy?.reservePct))
   const grid = el("div", "provider-grid")
   for (const provider of providers) grid.append(providerPanel(provider, now))
   figure.append(grid)

@@ -38,6 +38,23 @@ button:hover { background: var(--magpie-accent-soft, rgba(80, 120, 200, .08)); }
 button:active { transform: translateY(1px); }
 button:disabled { cursor: wait; opacity: .55; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.usage-guide { margin-bottom: 32px; }
+.guide-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; }
+.guide-policy { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; }
+.guide-policy select { min-height: 36px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); font: inherit; }
+.guide-list { margin-top: 14px; border-bottom: 1px solid var(--line); }
+.guide-row { display: grid; grid-template-columns: 84px minmax(0, 1fr) 240px; gap: 10px 24px; padding: 18px 0; border-top: 1px solid var(--line); }
+.guide-provider { padding-top: 3px; }
+.guide-body { min-width: 0; }
+.guide-action { font-size: 20px; line-height: 1.4; font-weight: 650; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.guide-reduce .guide-action, .guide-wait .guide-action { color: light-dark(#9b3b16, #f0b383); }
+.guide-increase .guide-action { color: var(--codex); }
+.guide-reason { max-width: 70ch; margin-top: 5px; }
+.guide-rates { display: grid; grid-template-columns: auto auto; align-content: start; align-items: baseline; gap: 6px 12px; margin: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+.guide-rates dd { margin: 0; text-align: right; font-weight: 600; }
+.guide-details { grid-column: 2 / -1; color: var(--muted); font-size: 12px; }
+.guide-details summary { width: fit-content; cursor: pointer; }
+.guide-details p { max-width: 75ch; margin-top: 6px; overflow-wrap: anywhere; }
 .provider-grid, .daily-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -131,6 +148,14 @@ th:last-child, td:last-child { padding-right: 0; }
 .account { max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 760px) {
   body { padding: 22px 20px 32px; }
+  .guide-row { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+  .guide-policy select { min-height: 44px; }
+  .guide-provider { padding: 0; }
+  .guide-action { font-size: 18px; }
+  .guide-rates { grid-template-columns: 88px minmax(0, 1fr); margin-top: 3px; }
+  .guide-rates dd { text-align: left; }
+  .guide-details { grid-column: 1; }
+  .guide-details summary { min-height: 44px; padding: 12px 0; }
   .provider-grid, .daily-grid { grid-template-columns: 1fr; }
   .provider, .provider + .provider, .provider-grid > .provider:nth-child(2n + 1),
   .daily-provider, .daily-provider + .daily-provider, .daily-grid > .daily-provider:nth-child(2n + 1) { padding: 20px 0; border-left: 0; }

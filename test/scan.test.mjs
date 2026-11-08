@@ -65,7 +65,7 @@ test("a window behind an even burn is fast, and only its own remaining counts", 
   assert.equal(dash.candles.find((c) => c.day === "2026-07-14").volume, 50000)
 })
 
-test("provider forecasts use three-day burn and include every account", async () => {
+test("provider forecasts use pooled observed burn and include every account", async () => {
   const start = now - 3 * DAY
   const reset = iso(start + 7 * DAY)
   const points = (fromLeft, toLeft) => [
@@ -86,7 +86,8 @@ test("provider forecasts use three-day burn and include every account", async ()
   assert.equal(codex.emptyAt, null)
   assert.equal(codex.resetAt, reset)
   assert.equal(codex.projection[0].left, 60)
-  assert.equal(codex.projection[1].left, 51.7)
+  assert.equal(codex.projection[1].left, 59.7)
+  assert.equal(codex.projection.find((p) => p.at === iso(now + DAY)).left, 51.7)
   assert.equal(codex.projection.at(-1).at, iso(now + 15 * DAY))
   assert.equal(dash.providers[1].resetAt, reset)
 })
@@ -104,8 +105,8 @@ test("one empty account does not mean the whole provider is empty", async () => 
   }, [], now, { offsetMin: 0 })
   const codex = dash.providers[0]
   assert.equal(codex.firstEmptyAt, iso(now + HOUR))
-  assert.equal(codex.emptyAt, null)
-  assert.equal(codex.projectedLeftAtReset, 45)
+  assert.equal(codex.emptyAt, iso(now + 10 * HOUR))
+  assert.equal(codex.projectedLeftAtReset, 0)
   assert.equal(codex.projection.find((p) => p.at === iso(now + HOUR)).left, 45)
 })
 
@@ -144,8 +145,8 @@ test("staggered resets do not hide another account's later depletion", async () 
   assert.equal(codex.resetAt, iso(now + 3 * DAY))
   assert.equal(codex.firstEmptyAt, iso(now + 4 * HOUR))
   assert.equal(codex.firstEmptyLabel, "codex · empty-later")
-  assert.equal(codex.emptyAt, null)
-  assert.equal(codex.projectedLeftAtReset, 50)
+  assert.equal(codex.emptyAt, iso(now + 24 * HOUR))
+  assert.equal(codex.projectedLeftAtReset, 0)
   assert.equal(codex.projection.at(-1).at, iso(now + 15 * DAY))
 })
 
@@ -322,7 +323,8 @@ test("weekly history starts only when all accounts are known and excludes future
     { at: iso(now - 15 * 60000), left: 50 },
     { at: iso(now), left: 50 },
   ])
-  assert.deepEqual(dash.providers.find((p) => p.id === "claude").history, [])
+  assert.equal(dash.providers.some((p) => p.id === "claude"), false)
+  assert.equal(dash.windows.find((w) => w.user === "new").left, 20)
 })
 
 test("weekly history seeds the exact fifteen-day range and bounds dense readings per hour", async () => {
@@ -376,7 +378,7 @@ test("six hours of history forecasts exhaustion before a twelve-hour reset", asy
   assert.equal(codex.projection.find((p) => p.at === codex.emptyAt).left, 0)
 })
 
-test("burn uses only the observed portion of the last three days", async () => {
+test("burn weights recent observed hours more heavily without inventing sparse seasonal detail", async () => {
   const start = now - 6 * DAY
   const reset = now + DAY
   const point = (at, left) => ({ at: iso(at), left, start: iso(start), resetsAt: iso(reset) })
@@ -387,8 +389,9 @@ test("burn uses only the observed portion of the last three days", async () => {
       point(now, 20),
     ] },
   }, [], now, { offsetMin: 0 })
-  // Half of the first interval (10 points) and all of the second (60).
-  assert.ok(Math.abs(dash.windows[0].dailyBurn - 70 / 3) < 1e-9)
+  // Two equal 48-hour blocks: the newer block has four times the weight.
+  assert.ok(Math.abs(dash.windows[0].dailyBurn - 26) < 1e-9)
+  assert.equal(dash.providers[0].method, "ewma")
 })
 
 test("burn excludes unobserved reset gaps from both consumption and duration", async () => {
@@ -401,9 +404,13 @@ test("burn excludes unobserved reset gaps from both consumption and duration", a
       point(now, 90, now - DAY, now + 6 * DAY),
     ] },
   }, [], now, { offsetMin: 0 })
-  // 40 points consumed over 36 observed hours; the reset gap is unknown.
-  assert.ok(Math.abs(dash.windows[0].dailyBurn - 40 / 1.5) < 1e-9)
-  assert.equal(dash.providers[0].emptyAt, iso(now + 3.375 * DAY))
+  // The unknown reset gap does not decay the level: 30/day followed by
+  // twelve observed hours at 20/day, with a 24-observed-hour half-life.
+  const oldWeight = 0.5 * 2 ** -0.5
+  const newWeight = 1 - 2 ** -0.5
+  const burn = (30 * oldWeight + 20 * newWeight) / (oldWeight + newWeight)
+  assert.ok(Math.abs(dash.windows[0].dailyBurn - burn) < 1e-9)
+  assert.ok(Math.abs(Date.parse(dash.providers[0].emptyAt) - (now + 90 / burn * DAY)) <= 1)
 })
 
 test("readings at the same timestamp are insufficient to measure burn", async () => {
