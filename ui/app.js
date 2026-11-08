@@ -200,7 +200,7 @@ function forecastChart(provider, now, width = 520) {
   for (const [key, accounts] of groups) {
     const at = Number(key)
     const xx = x(at)
-    const previous = projection.findLast((point) => Date.parse(point.at) < at)
+    const previous = projection.find((point) => Date.parse(point.at) >= at)
     const marker = svgEl("g", { class: "reset-marker" })
     const names = accounts.map((account) => account.label + " · " + account.window).join("、")
     const description = "周额度重置 " + when(new Date(at).toISOString()) + "：" + names
