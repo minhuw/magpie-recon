@@ -243,6 +243,121 @@ test("hot short windows cannot hide weekly accounts or enter weekly history", as
   assert.equal(only.reserve.left, 0)
 })
 
+test("hourly weekly history preserves depletion and reset within the same hour", async () => {
+  const resetAt = Date.parse("2026-07-15T09:35:00Z")
+  const point = (at, left) => ({
+    at,
+    left,
+    start: iso(Date.parse(at) < resetAt ? resetAt - 7 * DAY : resetAt),
+    resetsAt: iso(Date.parse(at) < resetAt ? resetAt : resetAt + 7 * DAY),
+  })
+  const dash = await analyze({
+    "codex|reset": { week: [
+      point("2026-07-14T12:00:00Z", 60),
+      point("2026-07-15T09:12:00Z", 20),
+      point("2026-07-15T09:25:00Z", 0),
+      point("2026-07-15T09:35:00Z", 100),
+      point("2026-07-15T09:45:00Z", 80),
+    ] },
+  }, [], now, { offsetMin: 0 })
+  const history = dash.providers[0].history
+  assert.deepEqual(history.filter((p) => p.at.startsWith("2026-07-15T09:")), [
+    { at: "2026-07-15T09:00:00.000Z", left: 60 },
+    { at: "2026-07-15T09:25:00.000Z", left: 0 },
+    { at: "2026-07-15T09:35:00.000Z", left: 100 },
+    { at: "2026-07-15T09:45:00.000Z", left: 80 },
+  ])
+  for (let at = now - 24 * HOUR; at <= now; at += HOUR) {
+    assert.ok(history.some((p) => p.at === iso(at)), `missing hourly sample at ${iso(at)}`)
+  }
+  assert.deepEqual(history.at(-1), { at: iso(now), left: 80 })
+})
+
+test("hourly history pools each account's current value at staggered and simultaneous updates", async () => {
+  const start = now - 2 * DAY
+  const point = (at, left) => ({ at, left, start: iso(start), resetsAt: iso(start + 7 * DAY) })
+  const dash = await analyze({
+    "codex|a": { week: [
+      point("2026-07-15T09:00:00Z", 100),
+      point("2026-07-15T09:10:00Z", 60),
+      point("2026-07-15T09:11:00Z", 60),
+      point("2026-07-15T09:12:00Z", 60),
+      point("2026-07-15T09:30:00Z", 100),
+    ] },
+    "Codex|b": { week: [
+      point("2026-07-15T09:00:00Z", 40),
+      point("2026-07-15T09:20:00Z", 100),
+      point("2026-07-15T09:30:00Z", 0),
+    ] },
+  }, [], now, { offsetMin: 0 })
+  const history = dash.providers[0].history
+  // Each update uses the other account's latest known value, regardless of reading frequency.
+  // Partial 09:30 updates would invent a transient maximum of 100 or minimum of 30.
+  assert.deepEqual(history.filter((p) => p.at.startsWith("2026-07-15T09:")), [
+    { at: "2026-07-15T09:00:00.000Z", left: 70 },
+    { at: "2026-07-15T09:10:00.000Z", left: 50 },
+    { at: "2026-07-15T09:20:00.000Z", left: 80 },
+    { at: "2026-07-15T09:30:00.000Z", left: 50 },
+  ])
+  assert.deepEqual(history.at(-1), { at: iso(now), left: 50 })
+  assert.equal(Math.min(...history.map((p) => p.left)), 50)
+})
+
+test("weekly history starts only when all accounts are known and excludes future readings", async () => {
+  const start = now - 2 * DAY
+  const point = (at, left) => ({ at: iso(at), left, start: iso(start), resetsAt: iso(start + 7 * DAY) })
+  const quota = {
+    "codex|known": { week: [point(now - 20 * DAY, 80)] },
+    "codex|new": { week: [
+      point(now - 35 * 60000, 40),
+      point(now - 15 * 60000, 20),
+      point(now + 60000, 0),
+    ] },
+    "claude|future-only": { week: [point(now + 60000, 0)] },
+  }
+  const dash = await analyze(quota, [], now, { offsetMin: 0 })
+  const codex = dash.providers.find((p) => p.id === "codex")
+  assert.deepEqual(codex.history, [
+    { at: iso(now - 35 * 60000), left: 60 },
+    { at: iso(now - 15 * 60000), left: 50 },
+    { at: iso(now), left: 50 },
+  ])
+  assert.deepEqual(dash.providers.find((p) => p.id === "claude").history, [])
+})
+
+test("weekly history seeds the exact fifteen-day range and bounds dense readings per hour", async () => {
+  const end = now + 23 * 60000 + 45321
+  const from = end - 15 * DAY
+  const start = end - 2 * DAY
+  const point = (at, left) => ({ at: iso(at), left, start: iso(start), resetsAt: iso(start + 7 * DAY) })
+  const points = [point(from - 2 * DAY, 10), point(from - 60000, 55)]
+  for (let at = from + 60000, minute = 1; at < end; at += 60000, minute++) {
+    points.push(point(at, 10 + minute % 80))
+  }
+  points.push(point(end, 33.34), point(end + 1, 0))
+  const dash = await analyze({ "codex|dense": { week: points } }, [], end, { offsetMin: 345 })
+  const history = dash.providers[0].history
+  assert.deepEqual(history[0], { at: iso(from), left: 55 })
+  assert.deepEqual(history.at(-1), { at: iso(end), left: 33.3 })
+  assert.ok(history.length > 15 * 24)
+  assert.ok(history.length <= 4 * (15 * 24 + 1))
+  const buckets = new Map()
+  let previous = -Infinity
+  for (const sample of history) {
+    const at = Date.parse(sample.at)
+    assert.ok(at >= from && at <= end)
+    assert.ok(at > previous, "timestamps must be strictly increasing and deduplicated")
+    assert.ok(sample.left > 0, "positive readings must not invent a zero")
+    const hour = Math.floor(at / HOUR)
+    buckets.set(hour, (buckets.get(hour) || 0) + 1)
+    previous = at
+  }
+  assert.ok([...buckets.values()].every((count) => count <= 4))
+  for (let at = (Math.floor(from / HOUR) + 1) * HOUR; at < end; at += HOUR) {
+    assert.ok(history.some((p) => p.at === iso(at)), `missing hourly boundary at ${iso(at)}`)
+  }
+})
+
 test("six hours of history forecasts exhaustion before a twelve-hour reset", async () => {
   const reset = now + 12 * HOUR
   const start = reset - 7 * DAY
@@ -453,6 +568,8 @@ test("a sandboxed page can read the service", async () => {
     const html = await page.text()
     assert.match(html, /verdict/)
     assert.doesNotMatch(html, /src="app.js"/)
+    assert.doesNotMatch(html, /src="forecast.js"/)
+    assert.ok(html.indexOf("function forecastChart(") < html.indexOf("const boot ="))
     const denied = await fetch(`http://127.0.0.1:${port}/api/dashboard`, {
       headers: { Origin: "https://evil.test", "x-reserve-token": "abcd" },
     })

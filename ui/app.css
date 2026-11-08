@@ -50,9 +50,21 @@ button:disabled { cursor: wait; opacity: .55; }
 .provider-grid > .provider:nth-child(2n + 1), .daily-grid > .daily-provider:nth-child(2n + 1) { border-left: 0; padding-left: 0; padding-right: 28px; }
 .provider-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
 .provider-head strong { font-size: 28px; line-height: 1.1; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.forecast-summary { min-height: 112px; }
 .outcome { margin-top: 16px; font-size: 15px; font-weight: 600; }
 .exhaustion-time { display: block; margin-top: 4px; font-size: 30px; line-height: 1.2; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
 .outcome-detail { min-height: 20px; margin-top: 2px; }
+.chart-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; margin-top: 16px; }
+.chart-control-group { display: flex; align-items: center; gap: 6px; }
+.chart-toolbar button { min-height: 36px; }
+.chart-toolbar button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.chart-toolbar button:disabled { cursor: default; }
+.chart-icon { display: inline-flex; align-items: center; justify-content: center; width: 36px; padding: 0; }
+.chart-range { margin-top: 9px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.forecast-chart { cursor: crosshair; touch-action: pan-y; user-select: none; }
+.chart-dragging, .chart-dragging .forecast-chart { cursor: grabbing; }
+.chart-cursor line { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 4; }
+.chart-cursor circle { fill: var(--bg); stroke: var(--provider); stroke-width: 2; }
 .forecast-chart, .daily-chart { display: block; width: 100%; height: auto; margin-top: 12px; overflow: visible; }
 .grid { stroke: var(--line); stroke-width: 1; }
 .axis-label, .reset-label, .empty-label, .empty-time {
@@ -123,6 +135,9 @@ th:last-child, td:last-child { padding-right: 0; }
   .provider, .provider + .provider, .provider-grid > .provider:nth-child(2n + 1),
   .daily-provider, .daily-provider + .daily-provider, .daily-grid > .daily-provider:nth-child(2n + 1) { padding: 20px 0; border-left: 0; }
   .provider + .provider, .daily-provider + .daily-provider { border-top: 1px solid var(--line); }
+  .forecast-summary { min-height: 0; }
+  .chart-toolbar button { min-height: 44px; }
+  .chart-icon { width: 44px; }
 }
 @media (max-width: 420px) {
   body { padding-right: 16px; padding-left: 16px; }
