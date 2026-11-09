@@ -70,6 +70,14 @@ test("snapshot age is a nonblocking reference note while later calls get actiona
   assert.equal(context.quotaSnapshotText(active), null)
 })
 
+test("an empty selection is explained as account selection, not exhaustion or lost history", () => {
+  const context = presentation()
+  const provider = { accounts: 0, knownAccounts: 4, capacity: 0, left: 0 }
+  assert.match(context.guidanceText(provider, now).title, /没有参与预测的可用账号/)
+  assert.doesNotMatch(context.guidanceText(provider, now).title, /已耗尽/)
+  assert.match(context.outcome(provider, now).detail, /历史记录保留/)
+})
+
 test("headline distinguishes confirmed exhaustion from a projection reaching zero", () => {
   const context = presentation()
   assert.equal(context.outcome({ accounts: 1, left: 0 }, now).title, "已耗尽")

@@ -119,6 +119,7 @@ function quotaSnapshotText(provider) {
 
 function guidanceText(provider, now) {
   const guide = provider.guidance
+  if (!provider.accounts && provider.knownAccounts) return { state: "observe", title: "当前没有参与预测的可用账号", reason: "可在账号管理中纳入有当前周额度的账号，或先在 Magpie 刷新账号额度。历史记录仍会保留。" }
   if (!provider.accounts || !guide) return { state: "observe", title: "等待周额度读数", reason: "读到进行中的周额度窗口后，会在这里显示使用建议。" }
   const change = Number.isFinite(guide.changePct) ? Math.max(1, Math.round(Math.abs(guide.changePct))) : null
   switch (guide.action) {
@@ -154,7 +155,7 @@ function usageGuide(providers, now, reservePct = providers.find((p) => p.guidanc
   const title = el("h2", "", "使用建议")
   title.id = "usage-guide-title"
   const heading = el("div", "guide-heading")
-  const policy = el("label", "guide-policy muted", "重置时目标预留 ")
+  const policy = el("label", "guide-policy muted", "每账号目标预留 ")
   const select = el("select", "")
   select.setAttribute("aria-label", "每账号安全余量")
   const choices = [...new Set([0, 3, 5, 10, reservePct])].sort((a, b) => a - b)
@@ -178,7 +179,9 @@ function usageGuide(providers, now, reservePct = providers.find((p) => p.guidanc
     const text = guidanceText(provider, now)
     const row = el("article", "guide-row guide-" + text.state)
     row.setAttribute("aria-label", provider.label + " 使用建议")
-    row.append(el("h3", "guide-provider", provider.label))
+    const identity = el("div", "guide-provider")
+    identity.append(el("h3", "", provider.label), el("p", "muted guide-capacity", (provider.accounts || 0) + " 个账号 · 满额 " + (provider.capacity || 0) + "%"))
+    row.append(identity)
     const body = el("div", "guide-body")
     body.append(el("p", "guide-action", text.title), el("p", "guide-reason muted", text.reason))
     const snapshotText = quotaSnapshotText(provider)
@@ -200,7 +203,7 @@ function usageGuide(providers, now, reservePct = providers.find((p) => p.guidanc
       details.append(el("p", "", "以 " + when(guide.resetAt) + " 前的使用为计划，每个账号预留 " + guide.reservePct + " 个百分点。目标附近约 10% 的偏差通常建议保持；预计提前耗尽时仍建议减速。"))
       const pattern = guide.seasonal === "weekly" ? "参考每周和日内规律" : guide.seasonal === "daily" ? "参考日内规律" : "按近期用量估计，尚未启用时段规律"
       details.append(el("p", "", "有效观测 " + decimalNumber.format(guide.coverageHours) + " 小时；" + pattern + "。近期读数权重更高，额度耗尽后的停用不当作需求下降。"))
-      details.append(el("p", "", "日消耗指未来 24 小时的估计；多账号时取每账号平均值，不能直接等同请求量或 token 数。"))
+      details.append(el("p", "", "日消耗指未来 24 小时的总额度消耗；一个账号满额记作 100%，不能直接等同请求量或 token 数。"))
       if (provider.freshness?.snapshotAccounts?.length) {
         details.append(el("p", "", "沿用快照的估计假设余额未变；没有网关调用记录不代表没有其他客户端用量。如果在其他地方用过这些账号，请先在 Magpie 用量页刷新额度。"))
       }
@@ -215,8 +218,44 @@ function usageGuide(providers, now, reservePct = providers.find((p) => p.guidanc
   return section
 }
 
+function accountSettings(data) {
+  const roster = data.accountRoster || []
+  const count = roster.filter((a) => a.included && a.available).length
+  const details = el("details", "account-settings")
+  details.id = "account-settings"
+  details.open = new URLSearchParams(location.search).get("accounts") === "open"
+  details.append(el("summary", "", "参与预测的账号 · " + count + " 个"))
+  details.append(el("p", "note", "新账号首次记录后自动纳入。取消勾选可排除已删除或不再使用的账号，只改变本插件的统计；过去的用量不会因此删除。"))
+  if (boot.notice === "selection-changed") {
+    const notice = el("p", "account-notice", "账号或设置已变化，已加载最新列表，请重新选择。")
+    notice.setAttribute("role", "status")
+    details.append(notice)
+    details.open = true
+  }
+  if (!roster.length) details.append(el("p", "muted", "尚未记录到周额度账号。"))
+  for (const account of roster) {
+    const action = (boot.accountActions || []).find((a) => a.id === account.id)
+    const label = el("label", "roster-option")
+    const input = el("input")
+    input.type = "checkbox"
+    input.checked = account.included
+    input.disabled = !action
+    input.setAttribute("aria-label", account.label + "参与预测")
+    input.addEventListener("change", () => {
+      input.disabled = true
+      location.assign(action.href)
+    })
+    const name = el("span", "roster-name", account.label)
+    name.append(el("span", "muted roster-hint", !account.available ? "暂无当前周额度，不计入可用容量" : account.included ? "参与预测和总额度统计" : "已排除，历史用量保留"))
+    const balance = el("span", "roster-balance muted", account.available ? account.left + "% / 100%" : "等待额度更新")
+    label.append(input, name, balance)
+    details.append(label)
+  }
+  return details
+}
+
 function outcome(provider, now) {
-  if (!provider.accounts) return { title: "没有进行中的窗口", detail: "等待额度读数" }
+  if (!provider.accounts) return { title: provider.knownAccounts ? "当前没有可用的参与账号" : "没有进行中的窗口", detail: provider.knownAccounts ? "历史记录保留，可在账号管理中调整" : "等待额度读数" }
   if (provider.left <= 0) return { title: "已耗尽", detail: "等待重置" }
   if (provider.status === "stale") return { title: "暂时无法判断", detail: "请在 Magpie 用量页刷新账号额度" }
   if (provider.status === "insufficient") return { title: "暂时无法判断", detail: "需要至少 20 分钟可比较的额度读数" }
@@ -229,7 +268,7 @@ function outcome(provider, now) {
     }
   }
   if (provider.projectedLeftAtReset != null) {
-    return { title: "不会耗尽", detail: "下次重置时平均剩余 " + provider.projectedLeftAtReset + "%" }
+    return { title: "不会耗尽", detail: "下次重置前总剩余 " + provider.projectedLeftAtReset + "%" }
   }
   return { title: "不会耗尽", detail: "" }
 }
@@ -240,9 +279,11 @@ function providerPanel(provider, now) {
   panel.style.setProperty("--provider", color)
   const head = el("div", "provider-head")
   head.append(el("h3", "", provider.label))
-  const remaining = el("strong", "", provider.left == null ? "—" : provider.left + "%")
-  remaining.setAttribute("aria-label", "剩余 " + (provider.left == null ? "未知" : provider.left + "%"))
-  head.append(remaining)
+  const balance = el("div", "provider-balance")
+  const remaining = el("strong", "", provider.accounts ? provider.left + "%" : "—")
+  remaining.setAttribute("aria-label", provider.accounts ? "总剩余 " + provider.left + "% ，总容量 " + provider.capacity + "%" : "没有参与账号")
+  balance.append(remaining, el("span", "muted provider-capacity", "/ " + (provider.capacity || 0) + "%"))
+  head.append(balance)
   panel.append(head)
 
   const result = outcome(provider, now)
@@ -253,7 +294,7 @@ function providerPanel(provider, now) {
   panel.append(summary, forecastChart(provider, now))
 
   if (provider.accounts) {
-    panel.append(el("p", "provider-meta", provider.accounts + " 个账号"))
+    panel.append(el("p", "provider-meta", provider.accounts + " 个账号 · 总容量 " + provider.capacity + "%"))
   }
   return panel
 }
@@ -433,7 +474,7 @@ function render(data) {
   const figureHead = el("div", "figure-head")
   const title = el("h2", "", "额度耗尽预测")
   title.id = "forecast-title"
-  figureHead.append(title, el("p", "note", "只看周额度；历史按小时显示并保留小时内极值，虚线按近期用量和已识别的时段规律估算。"))
+  figureHead.append(title, el("p", "note", "总额度相加：一个账号满额为 100%。灰色点线为总容量，菱形标记账号统计变化；实线为历史，虚线为预测。"))
   figure.append(figureHead, forecastControls(now), el("p", "chart-range muted"))
 
   const byId = new Map((data.providers || []).map((provider) => [provider.id, provider]))
@@ -441,7 +482,7 @@ function render(data) {
   for (const provider of data.providers || []) {
     if (provider.id !== "codex" && provider.id !== "claude") providers.push(provider)
   }
-  app.append(usageGuide(providers, now, data.policy?.reservePct))
+  app.append(usageGuide(providers, now, data.policy?.reservePct), accountSettings(data))
   const grid = el("div", "provider-grid")
   for (const provider of providers) grid.append(providerPanel(provider, now))
   figure.append(grid)

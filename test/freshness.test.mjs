@@ -40,7 +40,7 @@ test("an idle saved account cannot mark another active and freshly read account 
   })
   const provider = data.providers[0]
   assert.equal(provider.status, "ready")
-  assert.equal(provider.projection[0].left, 45)
+  assert.equal(provider.projection[0].left, 90)
   assert.equal(provider.freshness.snapshotAccounts.length, 1)
   assert.deepEqual(provider.freshness.unconfirmedAccounts, [])
   assert.notEqual(provider.guidance.action, "stale")

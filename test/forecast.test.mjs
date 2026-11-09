@@ -39,6 +39,22 @@ test("chart zoom keeps the pointed time in the same position", () => {
   assert.deepEqual(view(context), { start: now - DAY, end: now })
 })
 
+test("total-quota axis follows four and five account capacity without rewriting earlier ranges", () => {
+  const context = chartContext()
+  const provider = { accounts: 5, capacity: 500, history: [
+    { at: new Date(now - 2 * DAY).toISOString(), left: 320, capacity: 400 },
+    { at: new Date(now - DAY).toISOString(), left: 420, capacity: 500 },
+    { at: new Date(now).toISOString(), left: 400, capacity: 500 },
+  ], projection: [] }
+  assert.equal(context.quotaScale(provider, now - 2 * DAY, now - DAY - 1), 400)
+  assert.equal(context.quotaScale(provider, now - DAY, now), 500)
+  assert.equal(context.quotaScale({ ...provider, accounts: 0, capacity: 0 }, now - 2 * DAY, now), 500)
+  const sample = context.chartSample([{ at: 0, left: 300, capacity: 400, accounts: 4 }, { at: 10, left: 200, capacity: 400, accounts: 4 }], 5, true)
+  assert.equal(sample.left, 250)
+  assert.equal(sample.capacity, 400)
+  assert.equal(sample.accounts, 4)
+})
+
 test("history inspection keeps observed zeros until reset while forecasts interpolate", () => {
   const context = chartContext()
   const points = [{ at: 0, left: 20 }, { at: 10, left: 0 }, { at: 20, left: 100 }]

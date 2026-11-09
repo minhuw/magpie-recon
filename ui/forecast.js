@@ -106,7 +106,22 @@ function chartSample(points, at, interpolate = false) {
   const next = points[low]
   if (!interpolate || !next) return previous
   const ratio = (at - previous.at) / (next.at - previous.at)
-  return { at, left: previous.left + (next.left - previous.left) * ratio }
+  return { ...previous, at, left: previous.left + (next.left - previous.left) * ratio }
+}
+
+function quotaScale(provider, start, end) {
+  let maximum = 0
+  for (const points of [provider.history || [], provider.projection || []]) {
+    let preceding = null
+    for (const point of points) {
+      const at = Date.parse(point.at)
+      if (at < start) { preceding = point; continue }
+      if (at > end) break
+      maximum = Math.max(maximum, point.left || 0, point.capacity || 0)
+    }
+    if (preceding) maximum = Math.max(maximum, preceding.left || 0, preceding.capacity || 0)
+  }
+  return Math.max(100, Math.ceil((maximum || provider.capacity || provider.accounts * 100 || 100) / 100) * 100)
 }
 
 function forecastChart(provider, now, width = 520) {
@@ -118,13 +133,15 @@ function forecastChart(provider, now, width = 520) {
   const { start, end } = forecastView
   const empty = Date.parse(provider.emptyAt)
   const x = (at) => pad.left + (at - start) / (end - start) * plotWidth
-  const y = (left) => pad.top + (100 - left) / 100 * plotHeight
+  const maximum = quotaScale(provider, start, end)
+  const y = (left) => pad.top + (maximum - left) / maximum * plotHeight
   const result = outcome(provider, now)
   const label = provider.label + "，剩余 " + (provider.left ?? "—") + "% ，" + result.title + "，" + when(new Date(start).toISOString()) + " 至 " + when(new Date(end).toISOString())
   const chart = svgEl("svg", { class: "forecast-chart", viewBox: `0 0 ${width} ${height}`, role: "group", tabindex: 0, "aria-label": label, "aria-describedby": "forecast-help" })
   chart._source = { provider, now, width }
   chart.dataset.start = start
   chart.dataset.end = end
+  chart.dataset.maximum = maximum
   chart.append(svgEl("title", {}, label))
   const clipId = "forecast-clip-" + chartSerial++
   const defs = svgEl("defs")
@@ -134,7 +151,7 @@ function forecastChart(provider, now, width = 520) {
   chart.append(defs)
   const plot = svgEl("g", { "clip-path": `url(#${clipId})` })
 
-  for (const value of [0, 50, 100]) {
+  for (const value of [0, maximum / 2, maximum]) {
     const yy = y(value)
     chart.append(
       svgEl("line", { class: "grid", x1: pad.left, y1: yy, x2: width - pad.right, y2: yy }),
@@ -147,12 +164,12 @@ function forecastChart(provider, now, width = 520) {
     if (detailed) tick.append(svgEl("tspan", { x: x(at), dy: 15 }, new Date(at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })))
     chart.append(tick)
   }
-  if (!provider.accounts) {
+  if (!provider.accounts && !provider.history?.length) {
     chart.append(svgEl("text", { class: "empty-label", x: pad.left + plotWidth / 2, y: pad.top + plotHeight / 2, "text-anchor": "middle" }, "没有额度读数"))
     return chart
   }
 
-  const parse = (points) => (points || []).map((p) => ({ at: Date.parse(p.at), left: p.left })).filter((p) => Number.isFinite(p.at) && Number.isFinite(p.left))
+  const parse = (points) => (points || []).map((p) => ({ at: Date.parse(p.at), left: p.left, capacity: p.capacity ?? provider.capacity ?? provider.accounts * 100, accounts: p.accounts ?? provider.accounts })).filter((p) => Number.isFinite(p.at) && Number.isFinite(p.left))
   const history = parse(provider.history)
   const projection = parse(provider.projection)
   const path = (points, step = false) => {
@@ -169,11 +186,15 @@ function forecastChart(provider, now, width = 520) {
   }
   const historyPath = path(history, true)
   const projectionPath = path(projection)
+  const capacityHistory = path(history.map((p) => ({ ...p, left: p.capacity })), true)
+  const capacityProjection = path(projection.map((p) => ({ ...p, left: p.capacity })), true)
+  if (capacityHistory) plot.append(svgEl("path", { class: "capacity-line", d: capacityHistory }))
+  if (capacityProjection) plot.append(svgEl("path", { class: "capacity-line", d: capacityProjection }))
   if (historyPath) plot.append(svgEl("path", { class: "history", d: historyPath }))
   if (projectionPath) plot.append(svgEl("path", { class: "projection", d: projectionPath }))
   if (!historyPath && !projectionPath) chart.append(svgEl("text", { class: "empty-label", x: pad.left + plotWidth / 2, y: pad.top + plotHeight / 2, "text-anchor": "middle" }, "这一时段没有额度读数"))
 
-  if (now >= start && now <= end) {
+  if (now >= start && now <= end && provider.accounts) {
     const nowX = x(now)
     plot.append(svgEl("line", { class: "now-line", x1: nowX, y1: pad.top, x2: nowX, y2: plotBottom }))
     const nowLeft = projection[0]?.at === now ? projection[0].left : provider.left
@@ -217,6 +238,40 @@ function forecastChart(provider, now, width = 520) {
     marker.append(hit)
     plot.append(marker)
   }
+  const membershipGroups = new Map()
+  const kinds = { observed: "首次记录", included: "纳入统计", excluded: "排除统计", unavailable: "缺少当前周额度" }
+  for (const event of provider.membershipEvents || []) {
+    const at = Date.parse(event.at)
+    if (at < start || at > end) continue
+    if (!membershipGroups.has(at)) membershipGroups.set(at, [])
+    membershipGroups.get(at).push(event)
+  }
+  for (const [at, events] of membershipGroups) {
+    const last = events.at(-1)
+    const xx = x(at), yy = y(last.left)
+    const marker = svgEl("g", { class: "membership-marker" })
+    marker.append(svgEl("path", { class: "membership-dot", d: `M${xx},${yy - 5}l5,5 -5,5 -5,-5Z` }))
+    const description = "账号统计变化 " + when(new Date(at).toISOString()) + "：" + events.map((e) => kinds[e.kind] + " " + e.label).join("、") + "，总容量 " + last.capacity + "%"
+    const hit = svgEl("circle", { class: "reset-hit membership-hit", cx: xx, cy: yy, r: 12, tabindex: 0, role: "button", "aria-label": description })
+    const show = (event) => {
+      const rect = hit.getBoundingClientRect()
+      tooltip.replaceChildren(el("div", "tooltip-date", "账号变化 " + when(new Date(at).toISOString())))
+      const list = el("div", "tooltip-accounts")
+      for (const entry of events) list.append(el("div", "", kinds[entry.kind] + " · " + entry.label))
+      list.append(el("div", "tooltip-value", "总容量 " + last.capacity + "% · 剩余 " + last.left + "%"))
+      tooltip.append(list)
+      tooltip.hidden = false
+      positionTooltip(event?.clientX ?? rect.x, event?.clientY ?? rect.y)
+    }
+    hit.addEventListener("pointermove", show)
+    hit.addEventListener("click", show)
+    hit.addEventListener("focus", () => show())
+    hit.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); show() } })
+    hit.addEventListener("pointerleave", hideTooltip)
+    hit.addEventListener("blur", hideTooltip)
+    marker.append(hit)
+    plot.append(marker)
+  }
   if (Number.isFinite(empty) && empty >= start && empty <= end) {
     const xx = x(empty)
     plot.append(svgEl("circle", { class: "empty-point", cx: xx, cy: y(0), r: 4 }))
@@ -246,7 +301,8 @@ function forecastChart(provider, now, width = 520) {
     cursor.setAttribute("visibility", "visible")
     tooltip.replaceChildren(el("div", "tooltip-date", when(new Date(sample.at).toISOString())))
     const rows = el("div", "tooltip-rows")
-    rows.append(el("span", "tooltip-label", actual ? "历史剩余" : "预测剩余"), el("span", "tooltip-value", Math.round(sample.left * 10) / 10 + "%"))
+    rows.append(el("span", "tooltip-label", actual ? "历史总剩余" : "预测总剩余"), el("span", "tooltip-value", Math.round(sample.left * 10) / 10 + "%"))
+    rows.append(el("span", "tooltip-label", "统计容量"), el("span", "tooltip-value", sample.capacity + "% · " + sample.accounts + " 个账号"))
     tooltip.append(rows)
     tooltip.hidden = false
     positionTooltip(event.clientX, event.clientY)

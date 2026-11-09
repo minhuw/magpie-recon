@@ -79,15 +79,15 @@ test("provider forecasts use pooled observed burn and include every account", as
   }, [], now, { offsetMin: 0 })
   assert.deepEqual(dash.providers.map((p) => p.id), ["codex", "claude"])
   const codex = dash.providers[0]
-  assert.equal(codex.left, 60)
+  assert.equal(codex.left, 120)
   assert.equal(codex.accounts, 2)
   assert.equal(codex.status, "ready")
   assert.equal(codex.firstEmptyAt, iso(now + 3 * DAY))
   assert.equal(codex.emptyAt, null)
   assert.equal(codex.resetAt, reset)
-  assert.equal(codex.projection[0].left, 60)
-  assert.equal(codex.projection[1].left, 59.7)
-  assert.equal(codex.projection.find((p) => p.at === iso(now + DAY)).left, 51.7)
+  assert.equal(codex.projection[0].left, 120)
+  assert.equal(codex.projection[1].left, 119.3)
+  assert.equal(codex.projection.find((p) => p.at === iso(now + DAY)).left, 103.3)
   assert.equal(codex.projection.at(-1).at, iso(now + 15 * DAY))
   assert.equal(dash.providers[1].resetAt, reset)
 })
@@ -107,10 +107,10 @@ test("one empty account does not mean the whole provider is empty", async () => 
   assert.equal(codex.firstEmptyAt, iso(now + HOUR))
   assert.equal(codex.emptyAt, iso(now + 10 * HOUR))
   assert.equal(codex.projectedLeftAtReset, 0)
-  assert.equal(codex.projection.find((p) => p.at === iso(now + HOUR)).left, 45)
+  assert.equal(codex.projection.find((p) => p.at === iso(now + HOUR)).left, 90)
 })
 
-test("an all-account forecast requires every account to have a fresh trajectory", async () => {
+test("a newly observed account adds quota without erasing an existing trajectory", async () => {
   const start = now - 2 * DAY
   const reset = iso(start + 7 * DAY)
   const dash = await analyze({
@@ -123,10 +123,11 @@ test("an all-account forecast requires every account to have a fresh trajectory"
     ] },
   }, [], now, { offsetMin: 0 })
   const codex = dash.providers[0]
-  assert.equal(codex.status, "insufficient")
-  assert.equal(codex.emptyAt, null)
-  assert.equal(codex.projectedLeftAtReset, null)
-  assert.deepEqual(codex.projection, [])
+  assert.equal(codex.status, "ready")
+  assert.equal(codex.emptyAt, iso(now + 10 * HOUR))
+  assert.equal(codex.projectedLeftAtReset, 0)
+  assert.equal(codex.projection[0].left, 100)
+  assert.equal(codex.projection[0].capacity, 200)
 })
 
 test("staggered resets do not hide another account's later depletion", async () => {
@@ -229,11 +230,11 @@ test("hot short windows cannot hide weekly accounts or enter weekly history", as
   assert.deepEqual(dash.providers.map((p) => p.id), ["codex"])
   const codex = dash.providers[0]
   assert.equal(codex.accounts, 2)
-  assert.equal(codex.left, 40)
-  assert.equal(codex.history.at(-1).left, 40)
+  assert.equal(codex.left, 80)
+  assert.equal(codex.history.at(-1).left, 80)
   assert.equal(codex.accountsDetail.every((w) => w.window === "week"), true)
   assert.equal(dash.reserve.accounts, 2)
-  assert.equal(dash.reserve.left, 40)
+  assert.equal(dash.reserve.left, 80)
   assert.equal(dash.windows.find((w) => w.user === "exhausted" && w.window === "week").binding, true)
   assert.equal(dash.windows.filter((w) => w.window === "short").every((w) => !w.binding), true)
 
@@ -263,15 +264,15 @@ test("hourly weekly history preserves depletion and reset within the same hour",
   }, [], now, { offsetMin: 0 })
   const history = dash.providers[0].history
   assert.deepEqual(history.filter((p) => p.at.startsWith("2026-07-15T09:")), [
-    { at: "2026-07-15T09:00:00.000Z", left: 60 },
-    { at: "2026-07-15T09:25:00.000Z", left: 0 },
-    { at: "2026-07-15T09:35:00.000Z", left: 100 },
-    { at: "2026-07-15T09:45:00.000Z", left: 80 },
+    { at: "2026-07-15T09:00:00.000Z", left: 60, capacity: 100, accounts: 1 },
+    { at: "2026-07-15T09:25:00.000Z", left: 0, capacity: 100, accounts: 1 },
+    { at: "2026-07-15T09:35:00.000Z", left: 100, capacity: 100, accounts: 1 },
+    { at: "2026-07-15T09:45:00.000Z", left: 80, capacity: 100, accounts: 1 },
   ])
   for (let at = now - 24 * HOUR; at <= now; at += HOUR) {
     assert.ok(history.some((p) => p.at === iso(at)), `missing hourly sample at ${iso(at)}`)
   }
-  assert.deepEqual(history.at(-1), { at: iso(now), left: 80 })
+  assert.deepEqual(history.at(-1), { at: iso(now), left: 80, capacity: 100, accounts: 1 })
 })
 
 test("hourly history pools each account's current value at staggered and simultaneous updates", async () => {
@@ -293,18 +294,18 @@ test("hourly history pools each account's current value at staggered and simulta
   }, [], now, { offsetMin: 0 })
   const history = dash.providers[0].history
   // Each update uses the other account's latest known value, regardless of reading frequency.
-  // Partial 09:30 updates would invent a transient maximum of 100 or minimum of 30.
+  // Partial 09:30 updates would invent a transient maximum of 200 or minimum of 60.
   assert.deepEqual(history.filter((p) => p.at.startsWith("2026-07-15T09:")), [
-    { at: "2026-07-15T09:00:00.000Z", left: 70 },
-    { at: "2026-07-15T09:10:00.000Z", left: 50 },
-    { at: "2026-07-15T09:20:00.000Z", left: 80 },
-    { at: "2026-07-15T09:30:00.000Z", left: 50 },
+    { at: "2026-07-15T09:00:00.000Z", left: 140, capacity: 200, accounts: 2 },
+    { at: "2026-07-15T09:10:00.000Z", left: 100, capacity: 200, accounts: 2 },
+    { at: "2026-07-15T09:20:00.000Z", left: 160, capacity: 200, accounts: 2 },
+    { at: "2026-07-15T09:30:00.000Z", left: 100, capacity: 200, accounts: 2 },
   ])
-  assert.deepEqual(history.at(-1), { at: iso(now), left: 50 })
-  assert.equal(Math.min(...history.map((p) => p.left)), 50)
+  assert.deepEqual(history.at(-1), { at: iso(now), left: 100, capacity: 200, accounts: 2 })
+  assert.equal(Math.min(...history.map((p) => p.left)), 100)
 })
 
-test("weekly history starts only when all accounts are known and excludes future readings", async () => {
+test("weekly history starts with observed accounts and adds new accounts only at first read", async () => {
   const start = now - 2 * DAY
   const point = (at, left) => ({ at: iso(at), left, start: iso(start), resetsAt: iso(start + 7 * DAY) })
   const quota = {
@@ -318,10 +319,12 @@ test("weekly history starts only when all accounts are known and excludes future
   }
   const dash = await analyze(quota, [], now, { offsetMin: 0 })
   const codex = dash.providers.find((p) => p.id === "codex")
-  assert.deepEqual(codex.history, [
-    { at: iso(now - 35 * 60000), left: 60 },
-    { at: iso(now - 15 * 60000), left: 50 },
-    { at: iso(now), left: 50 },
+  assert.deepEqual(codex.history[0], { at: iso(now - 15 * DAY), left: 80, capacity: 100, accounts: 1 })
+  assert.ok(codex.history.filter((p) => Date.parse(p.at) < now - 35 * 60000).every((p) => p.left === 80 && p.capacity === 100 && p.accounts === 1))
+  assert.deepEqual(codex.history.filter((p) => Date.parse(p.at) >= now - 35 * 60000), [
+    { at: iso(now - 35 * 60000), left: 120, capacity: 200, accounts: 2 },
+    { at: iso(now - 15 * 60000), left: 100, capacity: 200, accounts: 2 },
+    { at: iso(now), left: 100, capacity: 200, accounts: 2 },
   ])
   assert.equal(dash.providers.some((p) => p.id === "claude"), false)
   assert.equal(dash.windows.find((w) => w.user === "new").left, 20)
@@ -339,8 +342,8 @@ test("weekly history seeds the exact fifteen-day range and bounds dense readings
   points.push(point(end, 33.34), point(end + 1, 0))
   const dash = await analyze({ "codex|dense": { week: points } }, [], end, { offsetMin: 345 })
   const history = dash.providers[0].history
-  assert.deepEqual(history[0], { at: iso(from), left: 55 })
-  assert.deepEqual(history.at(-1), { at: iso(end), left: 33.3 })
+  assert.deepEqual(history[0], { at: iso(from), left: 55, capacity: 100, accounts: 1 })
+  assert.deepEqual(history.at(-1), { at: iso(end), left: 33.3, capacity: 100, accounts: 1 })
   assert.ok(history.length > 15 * 24)
   assert.ok(history.length <= 4 * (15 * 24 + 1))
   const buckets = new Map()

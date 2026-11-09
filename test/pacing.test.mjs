@@ -130,7 +130,9 @@ test("pooling sums simultaneous demand through account switches without double c
   near(model.coverageHours, 12)
   near(demandBetween(model, now, now + DAY), 48)
   const absent = estimateDemand([{ points: a }, { points: [raw(now, 48)] }], now)
-  assert.equal(absent.level, null)
+  near(absent.level, estimateDemand([{ points: a }], now).level)
+  near(absent.coverageHours, 12)
+  assert.deepEqual(absent.shares, [1, 0])
   const exhausted = estimateDemand([{ points: [raw(now - 6 * HOUR, 0), raw(now, 0)] }, { points: [raw(now - 6 * HOUR, 60), raw(now, 48)] }], now)
   near(exhausted.level, 2)
   near(exhausted.coverageHours, 6)
@@ -144,18 +146,21 @@ test("idle reserves receive redistributed demand and eventually empty", () => {
   assert.equal(result.projection.find((p) => p.at === result.emptyAt).left, 0)
 })
 
-test("pool coverage is the intersection of comparable account intervals", () => {
+test("pool coverage intersects comparable intervals only after each first observation", () => {
   const a = [raw(now - 12 * HOUR, 80), raw(now - 6 * HOUR, 74), raw(now - 2 * HOUR, 80), raw(now, 78)]
   const b = [raw(now - 8 * HOUR, 80), raw(now - 4 * HOUR, 76), raw(now, 72)]
   const model = estimateDemand([{ points: a }, { points: b }], now)
-  near(model.coverageHours, 4)
-  near(model.level, 2)
+  // Four solo hours precede B's first observation, followed by four common
+  // hours. The invalid increase in A remains unknown after B has joined.
+  near(model.coverageHours, 8)
+  const decay = 2 ** (-4 / 24)
+  near(model.level, (decay + 2) / (decay + 1))
 })
 
 test("fresh lagged readings use redistribution before the forecast origin", () => {
   const result = simulatePool([row("busy", 1, now + 3 * DAY, now - HOUR / 2), row("reserve", 90, now + 3 * DAY, now - HOUR / 2)], flat(10, [1, 0]), now, now + DAY)
   // Five points were consumed since observation: one from busy and four from reserve.
-  assert.equal(result.projection[0].left, 43)
+  assert.equal(result.projection[0].left, 86)
   assert.equal(result.emptyAt, iso(now + 8.6 * HOUR))
   const staggered = simulatePool([row("busy", 10, now + 3 * DAY, now - HOUR / 3), row("reserve", 90, now + 3 * DAY, now - HOUR / 6)], flat(10, [1, 0]), now, now + DAY)
   assert.equal(staggered.firstEmptyAt, iso(now + HOUR * 2 / 3))
@@ -170,15 +175,15 @@ test("depletions are exact inside an hour, and reset-at-zero has no phantom blac
   assert.equal(immediate.firstEmptyAt, null)
   assert.equal(immediate.projectedLeftAtReset, 0)
   assert.deepEqual(immediate.projection.filter((p) => Date.parse(p.at) >= now + HOUR - 1 && Date.parse(p.at) <= now + HOUR), [
-    { at: iso(now + HOUR - 1), left: 0 }, { at: iso(now + HOUR), left: 100 },
+    { at: iso(now + HOUR - 1), left: 0, capacity: 100, accounts: 1 }, { at: iso(now + HOUR), left: 100, capacity: 100, accounts: 1 },
   ])
 })
 
 test("blackout after an earlier reset is retained and service resumes at later replenishment", () => {
   const result = simulatePool([row("a", 10, now + HOUR), row("b", 0, now + 24 * HOUR)], flat(10, [1, 0]), now, now + 25 * HOUR)
   assert.equal(result.emptyAt, iso(now + 11 * HOUR))
-  assert.equal(result.projection.find((p) => p.at === iso(now + 24 * HOUR)).left, 50)
-  assert.equal(result.projection.at(-1).left, 45)
+  assert.equal(result.projection.find((p) => p.at === iso(now + 24 * HOUR)).left, 100)
+  assert.equal(result.projection.at(-1).left, 90)
 })
 
 test("guidance solves exact constant budgets: reduce 40%, increase 80%, reserve parameter", async () => {
@@ -203,7 +208,7 @@ test("guidance respects the budget before a staggered reset, not just the final 
   near(p.guidance.factor, 0.75)
   assert.equal(p.guidance.resetAt, iso(now + DAY))
   assert.equal(p.guidance.nextResetAt, iso(now + 12 * HOUR))
-  near(p.guidance.targetDailyBurn, 9)
+  near(p.guidance.targetDailyBurn, 18)
 })
 
 test("guidance holds within ten percent but reduces for blackout before the planning end", async () => {

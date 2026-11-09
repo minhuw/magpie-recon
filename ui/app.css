@@ -45,6 +45,7 @@ button:disabled { cursor: wait; opacity: .55; }
 .guide-list { margin-top: 14px; border-bottom: 1px solid var(--line); }
 .guide-row { display: grid; grid-template-columns: 84px minmax(0, 1fr) 240px; gap: 10px 24px; padding: 18px 0; border-top: 1px solid var(--line); }
 .guide-provider { padding-top: 3px; }
+.guide-capacity { margin-top: 4px; font-size: 11px; line-height: 1.5; }
 .guide-body { min-width: 0; }
 .guide-action { font-size: 20px; line-height: 1.4; font-weight: 650; letter-spacing: -.01em; overflow-wrap: anywhere; }
 .guide-reduce .guide-action, .guide-wait .guide-action { color: light-dark(#9b3b16, #f0b383); }
@@ -66,6 +67,8 @@ button:disabled { cursor: wait; opacity: .55; }
 .provider + .provider, .daily-provider + .daily-provider { border-left: 1px solid var(--line); padding-right: 0; padding-left: 28px; }
 .provider-grid > .provider:nth-child(2n + 1), .daily-grid > .daily-provider:nth-child(2n + 1) { border-left: 0; padding-left: 0; padding-right: 28px; }
 .provider-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.provider-balance { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.provider-capacity { font-size: 13px; font-variant-numeric: tabular-nums; }
 .provider-head strong { font-size: 28px; line-height: 1.1; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
 .forecast-summary { min-height: 112px; }
 .outcome { margin-top: 16px; font-size: 15px; font-weight: 600; }
@@ -94,6 +97,8 @@ button:disabled { cursor: wait; opacity: .55; }
 .reset-hit { fill: transparent; cursor: pointer; }
 .reset-hit:focus-visible { outline: none; stroke: var(--fg); stroke-width: 1; }
 .now-line { stroke: var(--fg); stroke-width: 1; opacity: .16; }
+.capacity-line { fill: none; stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 5; opacity: .65; }
+.membership-dot { fill: var(--bg); stroke: var(--provider); stroke-width: 1.8; }
 .history { fill: none; stroke: var(--provider); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .projection { fill: none; stroke: var(--provider); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6; }
 .now-point { fill: var(--bg); stroke: var(--provider); stroke-width: 2.5; }
@@ -130,12 +135,21 @@ button:disabled { cursor: wait; opacity: .55; }
 .tooltip[hidden] { display: none; }
 .tooltip-date { padding-bottom: 8px; border-bottom: 1px solid var(--line); font-weight: 650; }
 .tooltip-rows { display: grid; grid-template-columns: 1fr auto; gap: 6px 20px; padding-top: 9px; }
-.tooltip-accounts { display: grid; gap: 7px; padding-top: 9px; }
+.tooltip-accounts { display: grid; gap: 7px; padding-top: 9px; overflow-wrap: anywhere; }
 .tooltip-account { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: baseline; }
 .tooltip-account-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tooltip-label { color: var(--muted); }
 .tooltip-value { text-align: right; font-weight: 600; }
 figcaption.note { margin-top: 10px; }
+.account-settings { margin-bottom: 28px; border-top: 1px solid var(--line); }
+.account-settings summary { width: fit-content; min-height: 44px; padding: 12px 0; font-weight: 600; cursor: pointer; }
+.account-settings > .note { margin: 0 0 12px; }
+.account-notice { margin-bottom: 12px; color: var(--muted); }
+.roster-option { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 52px; padding: 10px 0; border-top: 1px solid var(--line); cursor: pointer; }
+.roster-option input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
+.roster-name { min-width: 0; overflow-wrap: anywhere; }
+.roster-hint { display: block; margin-top: 2px; font-size: 12px; }
+.roster-balance { font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
 .windows { margin-top: 24px; border-top: 1px solid var(--line); }
 .windows summary { width: fit-content; padding: 14px 0; font-weight: 600; cursor: pointer; }
 .windows summary::marker { color: var(--muted); }
