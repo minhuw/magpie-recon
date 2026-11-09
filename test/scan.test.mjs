@@ -158,14 +158,14 @@ test("absolute depletion is anchored to the latest reading and stale pools are n
       { at: iso(now - 3 * HOUR), left: 50, start: iso(start), resetsAt: reset },
       { at: iso(now - 2 * HOUR), left: 40, start: iso(start), resetsAt: reset },
     ] },
-  }, [], now, { offsetMin: 0 })
+  }, [{ t: iso(now - HOUR), provider: "codex", providerAccount: "stale", status: 200, in: 10, out: 5 }], now, { offsetMin: 0 })
   assert.equal(dash.windows[0].forecastEmptyAt, iso(now - 2 * HOUR + 4 * HOUR))
   assert.equal(dash.providers[0].status, "stale")
   assert.equal(dash.providers[0].emptyAt, null)
   assert.deepEqual(dash.providers[0].projection, [])
 })
 
-test("fresh lagging readings use one time origin for the whole curve", async () => {
+test("a lagging snapshot without later calls is retained at the forecast origin", async () => {
   const start = now - 2 * DAY
   const reset = iso(start + 7 * DAY)
   const dash = await analyze({
@@ -178,8 +178,8 @@ test("fresh lagging readings use one time origin for the whole curve", async () 
   assert.equal(codex.status, "ready")
   assert.equal(codex.left, 20)
   assert.equal(codex.projection[0].at, iso(now))
-  assert.equal(codex.projection[0].left, 10)
-  assert.equal(codex.emptyAt, iso(now + 10 * 60000))
+  assert.equal(codex.projection[0].left, 20)
+  assert.equal(codex.emptyAt, iso(now + 20 * 60000))
   assert.equal(codex.projectedLeftAtReset, 0)
 })
 

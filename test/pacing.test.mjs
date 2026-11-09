@@ -11,9 +11,9 @@ const near = (actual, expected, tolerance = 1e-7) => assert.ok(Math.abs(actual -
 const raw = (at, left, reset = now + 3 * DAY) => ({ at, left, start: reset - 7 * DAY, reset })
 const readings = (hours, daily, left = 30, reset = now + 3 * DAY) => Array.from({ length: hours + 1 }, (_, i) => raw(now - (hours - i) * HOUR, left + (hours - i) * daily / 24, reset))
 const quotaPoints = (points) => points.map((p) => ({ at: iso(p.at), left: p.left, start: iso(p.start), resetsAt: iso(p.reset) }))
-async function dashboard(accounts, options = {}) {
+async function dashboard(accounts, options = {}, records = []) {
   const quota = Object.fromEntries(Object.entries(accounts).map(([name, points]) => [`codex|${name}`, { week: quotaPoints(points) }]))
-  return analyze(quota, [], now, { offsetMin: 0, ...options })
+  return analyze(quota, records, now, { offsetMin: 0, ...options })
 }
 const flat = (rate, shares = [1]) => ({ level: rate, shares, offsetMin: 0, rateAt: () => rate })
 const row = (label, left, reset, observedAt = now) => ({ label, left, reset: iso(reset), start: iso(reset - 7 * DAY), observedAt: iso(observedAt) })
@@ -233,13 +233,19 @@ test("zero demand has a finite idle budget; insufficient, short, and stale histo
   assert.equal(idle.factor, null)
   assert.equal(idle.changePct, null)
   near(idle.targetDailyBurn, 9)
-  for (const points of [[raw(now, 30)], readings(5, 15), readings(12, 15).map((p) => ({ ...p, at: p.at - HOUR }))]) {
+  for (const points of [[raw(now, 30)], readings(5, 15)]) {
     const p = (await dashboard({ a: points })).providers[0]
-    assert.ok(["observe", "stale"].includes(p.guidance.action))
+    assert.equal(p.guidance.action, "observe")
     assert.equal(p.guidance.changePct, null)
     assert.equal(p.guidance.factor, null)
     if (p.status !== "ready") assert.deepEqual(p.projection, [])
   }
+  const old = readings(12, 15).map((p) => ({ ...p, at: p.at - HOUR }))
+  const records = [{ t: iso(now - 60000), provider: "codex", providerAccount: "a", status: 200, in: 10, out: 5 }]
+  const p = (await dashboard({ a: old }, {}, records)).providers[0]
+  assert.equal(p.guidance.action, "stale")
+  assert.equal(p.guidance.changePct, null)
+  assert.deepEqual(p.projection, [])
 })
 
 test("exhausted pools wait even without a usable rate, and multi-account plans expose the assumption", async () => {

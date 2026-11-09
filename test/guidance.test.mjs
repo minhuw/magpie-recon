@@ -55,6 +55,21 @@ test("unavailable or idle guidance never fabricates a percentage change", () => 
   assert.match(context.guidanceText(provider("idle", null, { targetDailyBurn: 0 }), now).title, /预留范围/)
 })
 
+test("snapshot age is a nonblocking reference note while later calls get actionable refresh guidance", () => {
+  const context = presentation()
+  const old = provider("reduce", -40)
+  old.freshness = { snapshotAccounts: [{ label: "Codex · idle", observedAt: iso(now - 2 * HOUR) }], unconfirmedAccounts: [] }
+  assert.match(context.guidanceText(old, now).title, /减少约 40%/)
+  assert.match(context.quotaSnapshotText(old), /沿用上次余额.*未见相应网关调用/)
+  assert.doesNotMatch(context.quotaSnapshotText(old), /读数较旧|无法判断/)
+  const active = provider("stale")
+  active.freshness = { snapshotAccounts: [], unconfirmedAccounts: [{ label: "Codex · active", observedAt: iso(now - 2 * HOUR), lastUsedAt: iso(now - 60000) }] }
+  const text = context.guidanceText(active, now)
+  assert.equal(text.title, "额度尚未覆盖最近调用")
+  assert.match(text.reason, /Magpie 用量页刷新账号额度/)
+  assert.equal(context.quotaSnapshotText(active), null)
+})
+
 test("headline distinguishes confirmed exhaustion from a projection reaching zero", () => {
   const context = presentation()
   assert.equal(context.outcome({ accounts: 1, left: 0 }, now).title, "已耗尽")

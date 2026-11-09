@@ -110,6 +110,13 @@ function hideTooltip() {
   tooltip.hidden = true
 }
 
+function quotaSnapshotText(provider) {
+  const snapshots = provider.freshness?.snapshotAccounts || []
+  if (!snapshots.length) return null
+  const oldest = snapshots.reduce((a, b) => Date.parse(a.observedAt) < Date.parse(b.observedAt) ? a : b)
+  return snapshots.length + " 个账号沿用上次余额（最早 " + when(oldest.observedAt) + "），之后未见相应网关调用。"
+}
+
 function guidanceText(provider, now) {
   const guide = provider.guidance
   if (!provider.accounts || !guide) return { state: "observe", title: "等待周额度读数", reason: "读到进行中的周额度窗口后，会在这里显示使用建议。" }
@@ -133,7 +140,7 @@ function guidanceText(provider, now) {
     case "wait":
       return { state: "wait", title: "周额度已耗尽，等待重置", reason: "当前所有账号的周额度都已用完，最早于 " + when(guide.nextResetAt) + " 重置。" }
     case "stale":
-      return { state: "observe", title: "读数较旧，暂不建议调整用量", reason: "需要最近 30 分钟内的额度读数，更新后再判断该增快还是放慢。" }
+      return { state: "observe", title: provider.freshness?.unconfirmedAccounts?.length ? "额度尚未覆盖最近调用" : "需要确认当前额度", reason: "请在 Magpie 用量页刷新账号额度，再刷新本页。本页刷新不会向供应商重新查询额度。" }
     case "short_limited":
       return { state: "observe", title: "短时额度偏紧，暂不建议提速", reason: "周额度仍有余量，但短时窗口正在限制使用；先等待短时额度重置，或使用仍可用的账号。" }
     default:
@@ -174,6 +181,8 @@ function usageGuide(providers, now, reservePct = providers.find((p) => p.guidanc
     row.append(el("h3", "guide-provider", provider.label))
     const body = el("div", "guide-body")
     body.append(el("p", "guide-action", text.title), el("p", "guide-reason muted", text.reason))
+    const snapshotText = quotaSnapshotText(provider)
+    if (snapshotText && guide?.action !== "stale") body.append(el("p", "guide-reason muted", snapshotText))
     if (guide?.accountsEmpty > 0 && guide.accountsEmpty < guide.totalAccounts) {
       body.append(el("p", "guide-reason muted", "已有 " + guide.accountsEmpty + " 个账号周额度耗尽，后续用量按转移到其余账号估算。"))
     }
@@ -192,6 +201,10 @@ function usageGuide(providers, now, reservePct = providers.find((p) => p.guidanc
       const pattern = guide.seasonal === "weekly" ? "参考每周和日内规律" : guide.seasonal === "daily" ? "参考日内规律" : "按近期用量估计，尚未启用时段规律"
       details.append(el("p", "", "有效观测 " + decimalNumber.format(guide.coverageHours) + " 小时；" + pattern + "。近期读数权重更高，额度耗尽后的停用不当作需求下降。"))
       details.append(el("p", "", "日消耗指未来 24 小时的估计；多账号时取每账号平均值，不能直接等同请求量或 token 数。"))
+      if (provider.freshness?.snapshotAccounts?.length) {
+        details.append(el("p", "", "沿用快照的估计假设余额未变；没有网关调用记录不代表没有其他客户端用量。如果在其他地方用过这些账号，请先在 Magpie 用量页刷新额度。"))
+      }
+      for (const account of provider.freshness?.unconfirmedAccounts || []) details.append(el("p", "", account.label + "：额度读于 " + when(account.observedAt) + "，之后在 " + when(account.lastUsedAt) + " 仍有调用，需更新额度确认。"))
       if (guide.assumption) details.append(el("p", "", "多账号按容量相同、请求可互相切换估算；不同订阅档位的结果需要结合实际容量判断。"))
       for (const limited of guide.shortLimited || []) details.append(el("p", "", limited.label + " · " + limited.window + " 剩余 " + limited.left + "%，重置于 " + when(limited.reset) + "。"))
       row.append(details)
@@ -205,7 +218,7 @@ function usageGuide(providers, now, reservePct = providers.find((p) => p.guidanc
 function outcome(provider, now) {
   if (!provider.accounts) return { title: "没有进行中的窗口", detail: "等待额度读数" }
   if (provider.left <= 0) return { title: "已耗尽", detail: "等待重置" }
-  if (provider.status === "stale") return { title: "暂时无法判断", detail: "需要最近 30 分钟内的额度读数" }
+  if (provider.status === "stale") return { title: "暂时无法判断", detail: "请在 Magpie 用量页刷新账号额度" }
   if (provider.status === "insufficient") return { title: "暂时无法判断", detail: "需要至少 20 分钟可比较的额度读数" }
   if (provider.emptyAt && Date.parse(provider.emptyAt) <= now) return { title: "可能已耗尽", detail: "估计用量已超过最后读数，需要更新额度确认" }
   if (provider.emptyAt) {
